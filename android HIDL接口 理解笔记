@@ -1,0 +1,66 @@
+将Framework与HAL解耦，使得Framework升级时不依赖HAL。为了达到这一目的：
+
+1）Framework在hardware/interfaces目录下定义了一系列HIDL接口，Framework与HAL只能通过HIDL进行进程间通信，Framework不再加载HAL的动态库；
+
+2）Framework针对每个HIDL接口，都有default实现，可以理解为桩实现。保证了Framework即使更新了HIDL接口，也可以不依赖HAL，自己就可以进行完整的测试；
+
+3）default实现生成3个目标文件：服务端的*imp.so库，客户端的*.so库，服务端进程*-service，并通过*-rc脚本，将服务端进程启动起来；
+
+4）服务端进程如何向ServiceManager注册服务？
+
+passthrough模式通过defaultPassthroughServiceImplementation注册；
+
+binder模式通过registerAsService注册；
+
+HIDL 类型
+Passthrough
+兼容之前的HAL 使用方式（在同一个进程）。
+
+要将运行早期版本的 Android 的设备更新为使用 Android O，您可以将惯用的（和旧版）HAL 封装在一个新 HIDL 接口中，该接口将在绑定式模式和同进程（直通）模式提供 HAL。这种封装对于 HAL 和 Android 框架来说都是透明的。
+
+直通模式仅适用于 C++ 客户端和实现。运行早期版本的 Android 的设备没有用 Java 编写的 HAL，因此 Java HAL 自然而然经过 Binder 化。
+
+    ....... ......
+使用Binder 方式进行IPC（在不同进程）。
+
+在使用HIDL 的时候需要有两个软件包，一个是FQName-impl，一个是FQName-service。FQName-impl一般是HAL 实现的部分或者是链接HAL的部分，FQName-service 就是service 端。
+
+当然，为了兼容之前的HAL 旧版本和接口的统一，FQName-service 也可以是简单的直通（passthrough）模式。例如：
+ 
+
+5）客户端进程如何获取服务？
+
+在manifest.xml添加对应的HDIL服务名称，然后通过HIDL接口对象的getService接口获取；
+
+ 
+
+6）针对同一个HIDL接口，如何提供不同的实现？
+
+同一个HIDL接口，在不同的进程可以有不同的实现，通过registerAsService时传递不同的name来区分；相应的，客户端在getService时传入不同的name来获取；
+
+ICameraProvider就提供了 “legacy/0” 和“external/0”两种实现；
+
+ 
+
+7）非android原生，自定义的HIDL接口，应当如何增加？
+
+参考camResource，在vendor\huawei\interfaces\目录中增加
+/////////
+在hidl模块中需要借助 c2hal以及hidl-gen工具生成hidl层的接口定义文件以及编译配置文件：
+
+c2hal、hidl-gen均为google提供的工具，
+分别负责*.h -> *.hal，*.hal -> *.cpp/*.h的转换。
+其中c2hal工具不是必须的，因为*.hal文件也可以自己编写。
+在芯片组件根目录下，choosecombo后，直接执行：make c2hal && make hidl-gen，即可在out/host/linux-x86/bin生成两个工具。
+make c2hal && make hidl-gen
+
+工具的用法：
+1）out/host/linux-x86/bin/c2hal -r android.hardware:hardware/interfaces -p android.hardware.nfc@1.0 hardware/libhardware/include/hardware/nfc.h 
+
+会在 hardware/interfaces/nfc/1.0 目录下生成对应的nfc.hal 文件 
+
+2）out/host/linux-x86/bin/hidl-gen -o out -L c++ -randroid.hardware:hardware/interfaces -randroid.hidl:system/libhidl/transport  android.hardware.nfc@1.0::INfc  
+
+会在 out目录下生成 android/hardware/nfc/1.0/BnNfc.h，BpNfc.h BsNfc.h IHwNfc.h INfc.h NfcAll.cpp  
+
+这些即为最后参与编译的 prox 以及 stub 文件。
