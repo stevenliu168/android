@@ -1,0 +1,974 @@
+Android编译系统详解   
+
+Android的优势就在于其开源，手机和平板生产商可以根据自己的硬件进行个性定制自己的手机产品，如小米，LePhone，M9等，因此，在我们在对Android的源码进行定制的时候，很有必要了解下，Android的编译过程。如果你从来没有做过Android代码的编译，那么最官方的编译过程就是查看Android的官方网站：http://source.android.com/source/building.html
+
+但是，这儿只是告诉你了如何去编译一个通用的系统，并没有详细告诉你细节，我们跟着编译过程来了解下。
+
+按照google给出的编译步骤如下：
+
+   1> source build/envsetup.sh:加载命令
+
+   2> lunch：选择平台编译选项
+
+   3> make：执行编译
+
+我们按照编译步骤来分析编译过程的细节，最终添加自己的平台产品的编译选项。
+
+
+1. source build/envsetup.sh
+
+这个命令是用来将envsetup.sh里的所有用到的命令加载到环境变量里去，我们来分析下它。
+
+envsetup.sh里的主要命令如下：
+
+function help() 　　　　　　　　　　　　　　　　　# 显示帮助信息
+function get_abs_build_var()　　　　　　　　　　　# 获取绝对变量
+function get_build_var()　　　　　　　　　　　　　# 获取绝对变量
+function check_product()　　　　　　　　　　　　　# 检查product
+function check_variant()　　　　　　　　　　　　　# 检查变量
+function setpaths()　　　　　　　　　　　　　　　 # 设置文件路径
+function printconfig()　　　　　　　　　　　　　　# 打印配置
+function set_stuff_for_environment()　　　　　　  # 设置环境变量
+function set_sequence_number()　　　　　　　　    # 设置序号
+function settitle()　　　　　　　　　　　　　　　 # 设置标题
+function choosetype()　　　　　　　　　　　　　　 # 设置type
+function chooseproduct()　　　　　　　　　　　　  # 设置product
+function choosevariant()　　　　　　　　　　　　  # 设置variant
+function tapas()　　　　　　　　　　　　　　　　  # 功能同choosecombo
+function choosecombo()　　　　　　　　　　　　　  # 设置编译参数
+function add_lunch_combo()　　　　　　　　　　　  # 添加lunch项目
+function print_lunch_menu()　　　　　　　　　　　 # 打印lunch列表
+function lunch()　　　　　　　　　　　　　　　　　# 配置lunch
+function m()　　　　　　　　　　　　　　　　　　　# make from top
+function findmakefile()　　　　　　　　　　　　　 # 查找makefile
+function mm()　　　　　　　　　　　　　　　　　　 # make from current directory
+function mmm()　　　　　　　　　　　　　　　　　  # make the supplied directories
+function croot()　　　　　　　　　　　　　　　　　# 回到根目录
+function cproj()
+function pid()
+function systemstack()
+function gdbclient()
+function jgrep()　　　　　　　　　　　　　　　　　# 查找java文件
+function cgrep()　　　　　　　　　　　　　　　　  # 查找c/cpp文件
+function resgrep()
+function tracedmdump()
+function runhat()
+function getbugreports()
+function startviewserver()
+function stopviewserver()
+function isviewserverstarted()
+function smoketest()
+function runtest()
+function godir () 　　　　　　　　　　　　　　　　# 跳到指定目录 405
+
+ # add_lunch_combo函数被多次调用，就是它来添加Android编译选项 
+# Clear this variable.  It will be built up again when the vendorsetup.sh
+ 406 # files are included at the end of this file.
+ # 清空LUNCH_MENU_CHOICES变量，用来保存编译选项 
+ 407 unset LUNCH_MENU_CHOICES
+ 408 function add_lunch_combo()   
+ 409 {
+ 410     local new_combo=$1         # 获得add_lunch_combo被调用时的参数
+ 411     local c
+     # 依次遍历LUNCH_MENU_CHOICES里的值，其实该函数第一次调用时，该值为空
+ 412     for c in ${LUNCH_MENU_CHOICES[@]} ; do 
+ 413         if [ "$new_combo" = "$c" ] ; then    # 如果参数里的值已经存在于LUNCH_MENU_CHOICES变量里，则返回
+ 414             return
+ 415         fi
+ 416     done
+     # 如果参数的值不存在，则添加到LUNCH_MENU_CHOICES变量里
+ 417     LUNCH_MENU_CHOICES=(${LUNCH_MENU_CHOICES[@]} $new_combo)
+ 418 }
+
+
+# 这是系统自动增加了一个默认的编译项 generic-eng
+ 420 # add the default one here
+ 421 add_lunch_combo generic-eng    # 调用上面的add_lunch_combo函数，将generic-eng作为参数传递过去
+ 422 
+ 423 # if we're on linux, add the simulator.  There is a special case
+ 424 # in lunch to deal with the simulator
+ 425 if [ "$(uname)" = "Linux" ] ; then
+ 426     add_lunch_combo simulator
+ 427 fi
+
+# 下面的代码很重要，它要从vendor目录下查找vendorsetup.sh文件，如果查到了，就加载它
+1037 # Execute the contents of any vendorsetup.sh files we can find.
+1038 for f in `/bin/ls vendor/*/vendorsetup.sh vendor/*/build/vendorsetup.sh 2> /dev/null`
+1039 do
+1040     echo "including $f"
+1041    . $f       # 执行找到的脚本，其实里面就是厂商自己定义的编译选项
+1042 done
+1043 unset f
+
+ 
+
+envsetup.sh其主要作用如下：
+
+加载了编译时使用到的函数命令，如：help，lunch，m，mm，mmm等
+添加了两个编译选项：generic-eng和simulator，这两个选项是系统默认选项
+查找vendor/<-厂商目录>/和vendor/<厂商目录>/build/目录下的vendorsetup.sh，如果存在的话，加载执行它，添加厂商自己定义产品的编译选项
+ 其实，上述第3条是向编译系统添加了厂商自己定义产品的编译选项，里面的代码就是：add_lunch_combo xxx-xxx。
+根据上面的内容，可以推测出，如果要想定义自己的平台产品编译项，简单的办法是直接在envsetup.sh最后添加上add_lunch_combo myProduct-eng，当然这么做，不太符合上面代码最后的本意，我们还是老实的在vendor目录下创建自己公司名字，然后在公司目录下创建一个新的vendorsetup.sh，在里面添加上自己的产品编译项
+
+[plain] view plaincopy
+#mkdir vendor/farsight/  
+#touch vendor/farsight/vendorsetup.sh  
+#echo "add_lunch_combo fs100-eng" > vendor/farsight/vendorsetup.sh  
+这样，当我们在执行source build/envsetup.sh命令的时候，可以在shell上看到下面的信息：
+[plain] view plaincopy
+including vendor/farsight/vendorsetup.sh  
+
+2. 按照android官网的步骤，开始执行lunch full-eng
+当然如果你按上述命令执行，它编译的还是通用的eng版本系统，不是我们个性定制系统，我们可以执行lunch命令，它会打印出一个选择菜单，列出可用的编译选项
+
+如果你按照第一步中添加了vendorsetup.sh那么，你的选项中会出现：
+
+[plain] view plaincopy
+You're building on Linux  
+  
+generic-eng simulator fs100-eng  
+Lunch menu... pick a combo:  
+     1. generic-eng  
+     2. simulator  
+     3. fs100-eng  
+其中第3项是我们自己添加的编译项。
+lunch命令是envsetup.sh里定义的一个命令，用来让用户选择编译项，来定义Product和编译过程中用到的全局变量。
+
+我们一直没有说明前面的fs100-eng是什么意思，现在来说明下，fs100是我定义的产品的名字，eng是产品的编译类型，除了eng外，还有user, userdebug，分别表示：
+
+eng: 工程机，
+
+user:最终用户机
+
+userdebug:调试测试机
+
+tests:测试机
+
+由此可见，除了eng和user外，另外两个一般不能交给最终用户的，记得m8出来的时候，先放出了一部分eng工程机，然后出来了user机之后，可以用工程机换。
+
+那么这四个类型是干什么用的呢？其实，在main.mk里有说明，在Android的源码里，每一个目标（也可以看成工程）目录都有一个Android.mk的makefile，每个目标的Android.mk中有一个类型声明：LOCAL_MODULE_TAGS，这个TAGS就是用来指定，当前的目标编译完了属于哪个分类里。
+
+    PS:Android.mk和Linux里的makefile不太一样，它是Android编译系统自己定义的一个makefile来方便编译成：c,c++的动态、静态库或可执行程序，或java库或android的程序，
+
+好了，我们来分析下lunch命令干了什么？
+
+function lunch()
+{
+    local answer
+
+    # lunch后面直接带参数的情况，则编译项为指定的参数： $1
+
+    if [ "$1" ] ; then
+      
+        answer=$1
+    else
+       # lunch后面不带参数的情况，则调用print_lunch_menu函数，打印所有的target product和variant菜单提供用户选择
+        print_lunch_menu   
+        echo -n "Which would you like? [generic-eng] "
+        read answer   # 读取用户选择的结果，注意，这儿可以是数字，也可以是字符串的选项内容
+    fi
+
+    local selection=
+
+    # 如果用户在菜单中没有输入任何内容（直接回车），则为系统缺省的generic-eng编译项
+
+    if [ -z "$answer" ]
+    then
+                   selection=generic-eng
+    elif [ "$answer" = "simulator" ]
+    then
+        # 如果是用户输入的是模拟器：simulator
+        selection=simulator
+
+    # 如果answer是菜单中的数字，则获取该数字
+    elif (echo -n $answer | grep -q -e "^[0-9][0-9]*$")
+    then
+        if [ $answer -le ${#LUNCH_MENU_CHOICES[@]} ]       # 如果用户输入的菜单数字不合法（超过全部选项数组的元素个数）
+
+        # ${#LUNCH_MENU_CHOICES[@]}是指，取得LUNCH_MENU_CHOICES这个数组的元素个数，LUNCH_MENU_CHOICES[@]指引用数组里的全部元素，以列表返回
+        then
+            selection=${LUNCH_MENU_CHOICES[$(($answer-$_arrayoffset))]}    #这儿通过$answer - $_arrayoffset来引用用户输入的数字对应的数组LUNCH_MENU_CHOICES中的编译项，其中_arrayoffset这个变量表示，是否是数组下标从0开始，这儿其值为：1
+        fi
+        # 如果 answer字符串匹配 *-*模式(开头结尾不能为-)
+    elif (echo -n $answer | grep -q -e "^[^\-][^\-]*-[^\-][^\-]*$")
+    then
+        selection=$answer
+    fi
+
+    #如果selection为空，出错退出
+
+    if [ -z "$selection" ]
+    then
+        echo
+        echo "Invalid lunch combo: $answer"
+        return 1
+    fi
+
+    # special case the simulator
+    if [ "$selection" = "simulator" ]      #如果用户选项为使用模拟器
+    then
+        # 导出4个环境变量，这4个环境变量将指定编译系统编译为模拟器
+        export TARGET_PRODUCT=sim                    #产品变量
+        export TARGET_BUILD_VARIANT=eng         #版本型号变量
+        export TARGET_SIMULATOR=true                 #编译在模拟器中
+        export TARGET_BUILD_TYPE=debug           #类型变量
+    else
+
+        # 将 product-variant模式中的product分离出来，sed命令是将-后面的字符串替换为空串，也就是只保留-前面的内容
+        local product=$(echo -n $selection | sed -e "s/-.*$//")
+
+        # 检查之，调用关系 check_product()->get_build_var()->build/core/config.mk比较罗嗦，不展开了
+        check_product $product
+        if [ $? -ne 0 ]
+        then
+            echo
+            echo "** Don't have a product spec for: '$product'"
+            echo "** Do you have the right repo manifest?"
+            product=
+        fi
+
+        # 将 product-variant模式中的variant分离出来，sed命令将-前面的内容替换为空串
+        local variant=$(echo -n $selection | sed -e "s/^[^\-]*-//")
+
+        # 检查之，看看是否在 (user userdebug eng) 范围内
+        check_variant $variant
+        if [ $? -ne 0 ]
+        then
+            echo
+            echo "** Invalid variant: '$variant'"
+            echo "** Must be one of ${VARIANT_CHOICES[@]}"
+            variant=
+        fi
+
+        if [ -z "$product" -o -z "$variant" ]       #再次检查两个变量是否为空
+        then
+            echo
+            return 1
+        fi
+ #  导出4个环境变量（和上面模拟器的对比着看），这里很重要，因为后面的编译系统都是依赖于这里定义的几个变量的
+        export TARGET_PRODUCT=$product
+        export TARGET_BUILD_VARIANT=$variant
+        export TARGET_SIMULATOR=false
+        export TARGET_BUILD_TYPE=release
+    fi # !simulator
+
+    echo
+
+    # 设置到环境变量，比较多，不再一一列出，最简单的方法 set >env.txt 可获得
+    set_stuff_for_environment
+    # 打印一些主要的变量, 调用关系 printconfig()->get_build_var()->build/core/config.mk->build/core/envsetup.mk 比较罗嗦，不展开了
+    printconfig
+}
+
+ 
+
+由上面分析可知，lunch命令可以带参数和不带参数，最终导出一些重要的环境变量，从而影响编译系统的编译结果。导出的变量如下（以实际运行情况为例）
+[plain] view plaincopy
+TARGET_PRODUCT=fs100  
+TARGET_BUILD_VARIANT=eng  
+TARGET_SIMULATOR=false  
+TARGET_BUILD_TYPE=release  
+1. make 
+
+执行make命令的结果就是去执行当前目录下的Makefile文件，我们来看下它的内容：
+
+[html] view plaincopy
+1 ### DO NOT EDIT THIS FILE ###  
+2 include build/core/main.mk  
+3 ### DO NOT EDIT THIS FILE ###  
+
+呵呵，看到上面 的内容，我们都会笑，这是我见过最简单的Makefile了，我们再看下build/core/main.mk
+
+main.mk文件里虽然脚本不多，但是却定义了整个Android的编译关系，它主要引入了下列几个重要的mk文件：
+
+49 include $(BUILD_SYSTEM)/config.mk
+
+55 include $(BUILD_SYSTEM)/cleanbuild.mk
+
+142 include $(BUILD_SYSTEM)/definitions.mk
+
+当然每个mk文件都有自己独特的意义，我一并将主线流程通过下面这个图各表现出来，先有个整体的概念，然后再细化了解。
+
+
+
+所有的Makefile都通过build/core/main.mk这个文件组织在一起，它定义了一个默认goals：droid，当我们在TOP目录下，敲Make实际上就等同于我们执行make droid。
+
+当Make include所有的文件，完成对所有make我文件的解析以后就会寻找生成droid的规则，依次生成它的依赖，直到所有满足的模块被编译好，然后使用相应的工具打包成相应的img。其中，config.mk，envsetup.mk，product_config.mk文件是编译用户指定平台系统的关键文件。上图中红色部分是用户指定平台产品的编译主线，我们先来看下config.mk的主要作用。
+
+2. build/core/config.mk
+
+该文件被main.mk包含。
+
+定义了以下环境变量：
+
+[plain] view plaincopy
+16 SRC_HEADERS := \  
+17     $(TOPDIR)system/core/include \  
+18     $(TOPDIR)hardware/libhardware/include \  
+19     $(TOPDIR)hardware/libhardware_legacy/include \  
+20     $(TOPDIR)hardware/ril/include \  
+21     $(TOPDIR)dalvik/libnativehelper/include \  
+22     $(TOPDIR)frameworks/base/include \  
+23     $(TOPDIR)frameworks/base/opengl/include \  
+24     $(TOPDIR)external/skia/include  
+25 SRC_HOST_HEADERS:=$(TOPDIR)tools/include  
+26 SRC_LIBRARIES:= $(TOPDIR)libs  
+27 SRC_SERVERS:= $(TOPDIR)servers  
+28 SRC_TARGET_DIR := $(TOPDIR)build/target  
+29 SRC_API_DIR := $(TOPDIR)frameworks/base/api  
+[plain] view plaincopy
+.....然后定义了下面的重要的编译命令  
+[plain] view plaincopy
+ 43 CLEAR_VARS:= $(BUILD_SYSTEM)/clear_vars.mk  
+ 44 BUILD_HOST_STATIC_LIBRARY:= $(BUILD_SYSTEM)/host_static_library.mk  
+ 45 BUILD_HOST_SHARED_LIBRARY:= $(BUILD_SYSTEM)/host_shared_library.mk  
+ 46 BUILD_STATIC_LIBRARY:= $(BUILD_SYSTEM)/static_library.mk  
+ 47 BUILD_RAW_STATIC_LIBRARY := $(BUILD_SYSTEM)/raw_static_library.mk  
+ 48 BUILD_SHARED_LIBRARY:= $(BUILD_SYSTEM)/shared_library.mk  
+ 49 BUILD_EXECUTABLE:= $(BUILD_SYSTEM)/executable.mk  
+ 50 BUILD_RAW_EXECUTABLE:= $(BUILD_SYSTEM)/raw_executable.mk  
+ 51 BUILD_HOST_EXECUTABLE:= $(BUILD_SYSTEM)/host_executable.mk  
+ 52 BUILD_PACKAGE:= $(BUILD_SYSTEM)/package.mk  
+ 53 BUILD_HOST_PREBUILT:= $(BUILD_SYSTEM)/host_prebuilt.mk  
+ 54 BUILD_PREBUILT:= $(BUILD_SYSTEM)/prebuilt.mk  
+ 55 BUILD_MULTI_PREBUILT:= $(BUILD_SYSTEM)/multi_prebuilt.mk  
+ 56 BUILD_JAVA_LIBRARY:= $(BUILD_SYSTEM)/java_library.mk  
+ 57 BUILD_STATIC_JAVA_LIBRARY:= $(BUILD_SYSTEM)/static_java_library.mk  
+ 58 BUILD_HOST_JAVA_LIBRARY:= $(BUILD_SYSTEM)/host_java_library.mk  
+ 59 BUILD_DROIDDOC:= $(BUILD_SYSTEM)/droiddoc.mk  
+ 60 BUILD_COPY_HEADERS := $(BUILD_SYSTEM)/copy_headers.mk  
+ 61 BUILD_KEY_CHAR_MAP := $(BUILD_SYSTEM)/key_char_map.mk  
+上述命令变量其实是对应的mk文件名，几乎所有的Android.mk文件里基本上都包含上述命令变量，如：
+
+CLEAR_VARS：用来清除之前定义的环境变量
+
+BUILD_SHARED_LIBRARY：用来指定编译动态库过程
+
+[plain] view plaincopy
+109 # ---------------------------------------------------------------  
+110 # Define most of the global variables.  These are the ones that  
+111 # are specific to the user's build configuration.  
+### evnsetup.mk文件里定义了大部分的全局变量，用户使用这些变量来编译系统  
+112 include $(BUILD_SYSTEM)/envsetup.mk  
+113   
+114 # Boards may be defined under $(SRC_TARGET_DIR)/board/$(TARGET_DEVICE)  
+115 # or under vendor/*/$(TARGET_DEVICE).  Search in both places, but  
+116 # make sure only one exists.  
+117 # Real boards should always be associated with an OEM vendor.  
+### 板级配置信息通常定义在$(SRC_TARGET_DIR)/board/$(TARGET_DEVICE)或vendor/*/$(TARGET_DEVICE)下面，从这两个地方搜索，但是只能有一个地方存在板级配置信息（TARGET_DEVICE变量在上面的envsetup.mk里定义）  
+  
+  
+### wildcard命令用于在某个目录下查找匹配的文件，将找到的文件列表返回  
+118 board_config_mk := \  
+119     $(strip $(wildcard \  
+120         $(SRC_TARGET_DIR)/board/$(TARGET_DEVICE)/BoardConfig.mk \  
+121         vendor/*/$(TARGET_DEVICE)/BoardConfig.mk \  
+122     ))  
+### 如果没有找到，提示出错  
+123 ifeq ($(board_config_mk),)  
+124   $(error No config file found for TARGET_DEVICE $(TARGET_DEVICE))  
+125 endif  
+### 如果找到了1个以上时，提示出错  
+126 ifneq ($(words $(board_config_mk)),1)  
+127   $(error Multiple board config files for TARGET_DEVICE $(TARGET_DEVICE): $(board_config_mk))  
+128 endif  
+129 include $(board_config_mk)  # 将板级配置信息包含进来  
+130 TARGET_DEVICE_DIR := $(patsubst %/,%,$(dir $(board_config_mk)))  
+131 board_config_mk :=  
+112行又包含了另外一个重要的mk文件envsetup.mk，我们来看一下。
+3. envsetup.mk
+
+[plain] view plaincopy
+25 ifeq ($(TARGET_PRODUCT),)       # 如果TARGET_PRODUCT为空  
+26 ifeq ($(TARGET_SIMULATOR),true) # 编译为模拟器  
+27 TARGET_PRODUCT := sim  
+28 else  
+29 TARGET_PRODUCT := generic       # 默认产品名字为generic  
+30 endif  
+31 endif  
+第25行，判断TARGET_PRODUCT是否为空，根据上一节分析可知，TARGET_PRODUCT=fs100 
+[plain] view plaincopy
+34 # the variant -- the set of files that are included for a build  
+35 ifeq ($(strip $(TARGET_BUILD_VARIANT)),)  # 如果编译版本型号变量为空  
+36 TARGET_BUILD_VARIANT := eng  
+37 endif  
+38   
+39 # Read the product specs so we an get TARGET_DEVICE and other  
+40 # variables that we need in order to locate the output files.  
+## product_config.mk文件，读取产品配置信息，从而得到目标设备，将其导出到TARGET_DEVICE变量里，后面的定义的OUT变量的值，也依赖于目标设备TARGET_DEVICE，用于指定目标代码的输出目录  
+41 include $(BUILD_SYSTEM)/product_config.mk  
+在41行又包含了product_config.mk文件，等会我们再分析它，先看下面的
+[plain] view plaincopy
+148 # ---------------------------------------------------------------  
+149 # figure out the output directories  
+150   
+151 ifeq (,$(strip $(OUT_DIR)))  
+152 OUT_DIR := $(TOPDIR)out  
+153 endif  
+154   
+155 DEBUG_OUT_DIR := $(OUT_DIR)/debug  
+156   
+157 # Move the host or target under the debug/ directory  
+158 # if necessary.  
+159 TARGET_OUT_ROOT_release := $(OUT_DIR)/target  
+160 TARGET_OUT_ROOT_debug := $(DEBUG_OUT_DIR)/target  
+161 TARGET_OUT_ROOT := $(TARGET_OUT_ROOT_$(TARGET_BUILD_TYPE))  
+162   
+...  
+### 这个重要的OUT变量，依赖于目标设备名TARGET_DEVICE  
+184 PRODUCT_OUT := $(TARGET_PRODUCT_OUT_ROOT)/$(TARGET_DEVICE)    
+187   
+188 HOST_OUT_EXECUTABLES:= $(HOST_OUT)/bin  
+189 HOST_OUT_SHARED_LIBRARIES:= $(HOST_OUT)/lib  
+190 HOST_OUT_JAVA_LIBRARIES:= $(HOST_OUT)/framework  
+191 HOST_OUT_SDK_ADDON := $(HOST_OUT)/sdk_addon  
+...  
+200 TARGET_OUT_INTERMEDIATES := $(PRODUCT_OUT)/obj  
+201 TARGET_OUT_HEADERS:= $(TARGET_OUT_INTERMEDIATES)/include  
+202 TARGET_OUT_INTERMEDIATE_LIBRARIES := $(TARGET_OUT_INTERMEDIATES)/lib  
+203 TARGET_OUT_COMMON_INTERMEDIATES := $(TARGET_COMMON_OUT_ROOT)/obj  
+204  
+### 后面的OUT变量都要间接依赖于TARGET_DEVICE  
+205 TARGET_OUT := PRODUCT_OUT)/system  
+206 TARGET_OUT_EXECUTABLES:= $(TARGET_OUT)/bin  
+207 TARGET_OUT_OPTIONAL_EXECUTABLES:= $(TARGET_OUT)/xbin  
+208 TARGET_OUT_SHARED_LIBRARIES:= $(TARGET_OUT)/lib  
+209 TARGET_OUT_JAVA_LIBRARIES:= $(TARGET_OUT)/framework  
+210 TARGET_OUT_APPS:= $(TARGET_OUT)/app  
+211 TARGET_OUT_KEYLAYOUT := $(TARGET_OUT)/usr/keylayout  
+212 TARGET_OUT_KEYCHARS := $(TARGET_OUT)/usr/keychars  
+213 TARGET_OUT_ETC := $(TARGET_OUT)/etc  
+214 TARGET_OUT_STATIC_LIBRARIES:= $(TARGET_OUT_INTERMEDIATES)/lib  
+215 TARGET_OUT_NOTICE_FILES:=$(TARGET_OUT_INTERMEDIATES)/NOTICE_FILES  
+216   
+217 TARGET_OUT_DATA := $(<strong>PRODUCT_OUT</strong>)/data  
+218 TARGET_OUT_DATA_EXECUTABLES:= $(TARGET_OUT_EXECUTABLES)  
+219 TARGET_OUT_DATA_SHARED_LIBRARIES:= $(TARGET_OUT_SHARED_LIBRARIES)  
+220 TARGET_OUT_DATA_JAVA_LIBRARIES:= $(TARGET_OUT_JAVA_LIBRARIES)  
+221 TARGET_OUT_DATA_APPS:= $(TARGET_OUT_DATA)/app  
+222 TARGET_OUT_DATA_KEYLAYOUT := $(TARGET_OUT_KEYLAYOUT)  
+223 TARGET_OUT_DATA_KEYCHARS := $(TARGET_OUT_KEYCHARS)  
+224 TARGET_OUT_DATA_ETC := $(TARGET_OUT_ETC)  
+225 TARGET_OUT_DATA_STATIC_LIBRARIES:= $(TARGET_OUT_STATIC_LIBRARIES)  
+226   
+227 TARGET_OUT_UNSTRIPPED := $(<strong>PRODUCT_OUT</strong>)/symbols  
+228 TARGET_OUT_EXECUTABLES_UNSTRIPPED := $(TARGET_OUT_UNSTRIPPED)/system/bin  
+229 TARGET_OUT_SHARED_LIBRARIES_UNSTRIPPED := $(TARGET_OUT_UNSTRIPPED)/system/lib  
+230 TARGET_ROOT_OUT_UNSTRIPPED := $(TARGET_OUT_UNSTRIPPED)  
+231 TARGET_ROOT_OUT_SBIN_UNSTRIPPED := $(TARGET_OUT_UNSTRIPPED)/sbin  
+232 TARGET_ROOT_OUT_BIN_UNSTRIPPED := $(TARGET_OUT_UNSTRIPPED)/bin  
+233   
+234 TARGET_ROOT_OUT := $(<strong>PRODUCT_OUT</strong>)/root  
+235 TARGET_ROOT_OUT_BIN := $(TARGET_ROOT_OUT)/bin  
+236 TARGET_ROOT_OUT_SBIN := $(TARGET_ROOT_OUT)/sbin  
+237 TARGET_ROOT_OUT_ETC := $(TARGET_ROOT_OUT)/etc  
+238 TARGET_ROOT_OUT_USR := $(TARGET_ROOT_OUT)/usr  
+239   
+240 TARGET_RECOVERY_OUT := $(<strong>PRODUCT_OUT</strong>)/recovery  
+241 TARGET_RECOVERY_ROOT_OUT := $(TARGET_RECOVERY_OUT)/root  
+242   
+243 TARGET_SYSLOADER_OUT := $(<strong>PRODUCT_OUT</strong>)/sysloader  
+244 TARGET_SYSLOADER_ROOT_OUT := $(TARGET_SYSLOADER_OUT)/root  
+245 TARGET_SYSLOADER_SYSTEM_OUT := $(TARGET_SYSLOADER_OUT)/root/system  
+246   
+247 TARGET_INSTALLER_OUT := $(<strong>PRODUCT_OUT</strong>)/installer  
+248 TARGET_INSTALLER_DATA_OUT := $(TARGET_INSTALLER_OUT)/data  
+249 TARGET_INSTALLER_ROOT_OUT := $(TARGET_INSTALLER_OUT)/root  
+250 TARGET_INSTALLER_SYSTEM_OUT := $(TARGET_INSTALLER_OUT)/root/system  
+上面的代码是指定了目标输出代码的位置和主机输出代码的位置，重要的几个如下：
+[plain] view plaincopy
+TARGET_OUT = $(<strong>PRODUCT_OUT</strong>)/system  
+TARGET_OUT_EXECUTABLES =  $(PRODUCT_OUT)/system/bin  
+TARGET_OUT_SHARED_LIBRARIES =  $(PRODUCT_OUT)/system/lib  
+TARGET_OUT_JAVA_LIBRARIES = $(PRODUCT_OUT)/system/framework  
+TARGET_OUT_APPS = $(PRODUCT_OUT)/system/app  
+TARGET_OUT_ETC = $(PRODUCT_OUT)/system/etc  
+TARGET_OUT_STATIC_LIBRARIES  = $(PRODUCT_OUT)/obj/lib  
+TARGET_OUT_DATA = $(PRODUCT_OUT)/data  
+TARGET_OUT_DATA_APPS = $(PRODUCT_OUT)/data/app  
+TARGET_ROOT_OUT = $(PRODUCT_OUT)/root  
+TARGET_ROOT_OUT_BIN = $(PRODUCT_OUT)/bin  
+TARGET_ROOT_OUT_SBIN  = $(PRODUCT_OUT)/system/sbin  
+TARGET_ROOT_OUT_ETC = $(PRODUCT_OUT)/system/etc  
+TARGET_ROOT_OUT_USR = $(PRODUCT_OUT)/system/usr  
+总结下：
+
+envsetup.mk文件主要包含了product_config.mk文件，然后指定了编译时要输出的所有文件的OUT目录，这些OUT目录变量依赖于TARGET_DEVICE变量。
+
+
+4. build/core/product_config.mk
+[plain] view plaincopy
+157 include $(BUILD_SYSTEM)/product.mk  
+...  
+160 # Read in all of the product definitions specified by the AndroidProducts.mk  
+161 # files in the tree.  
+162 #  
+163 #TODO: when we start allowing direct pointers to product files,  
+164 #    guarantee that they're in this list.  
+165 $(call import-products, $(get-all-product-makefiles))  
+166 $(check-all-products)  
+...  
+170 # Convert a short name like "sooner" into the path to the product  
+171 # file defining that product.  
+172 #  
+173 INTERNAL_PRODUCT := $(call resolve-short-product-name, $(TARGET_PRODUCT))  
+...  
+176 # Find the device that this product maps to.  
+177 TARGET_DEVICE := $(PRODUCTS.$(INTERNAL_PRODUCT).PRODUCT_DEVICE)  
+157行，**，又包含了product.mk文件
+165行，调用函数import-products, $(get-all-product-makefiles)，这儿我们看上面的注释：
+
+    Read in all of the product definitions specified by the AndroidProducts.mk files in the tree.
+    TODO: when we start allowing direct pointers to product files, guarantee that they're in this list.
+
+    意思是说：读取厂商目录下（vendor/*/products/AndroidProducts.mk）所有的AndrodProducts.mk文件中定义的产品信息
+
+    其实get-all-product-makefiles返回厂商全部产品文件xxx.mk
+
+    import-products函数去验证这些产品配置文件是否都包含有必须的配置信息，细节后面分析。
+
+173行调用了resolve-short-product-name函数，它将根据产品TARGET_PRODUCT，返回该产品配置文件的完整路径，并赋给INTERNAL_PRODUCT
+
+    例如TARGET_PRODUCT=fs100，则：
+
+    INTERNAL_PRODUCT = vendor/farsight/products/fs100.mk
+
+    TARGET_DEVICE = fs100
+
+    如果调试看其结果，可以在167行，将#$(dump-product)取消注释
+
+    然后在175行添加： $(info $(INTERNAL_PRODUCT))
+
+    在178行添加： $(info $(TARGET_DEVICE ))，查看调试结果。
+
+总结一下：
+
+接合前面的图，product_config.mk主要读取vendor目录下不同厂商自己定义的AndrodProducts.mk文件(vendor/*/products/AndroidProducts.mk)，从该文件里取得所有产品的配置文件，然后再根据lunch选择的编译项TARGET_PRODUCT，找到与之对应的配置文件，然后读取产品配置文件，找到里面的PRODUCT_DEVICE的值，设置给TARGET_DEVICE变量，用于后续编译。
+
+5. build/core/product.mk
+
+[plain] view plaincopy
+17 #  
+18 # Functions for including AndroidProducts.mk files  
+19 #  
+20   
+21 #  
+22 # Returns the list of all AndroidProducts.mk files.  
+23 # $(call ) isn't necessary.  
+24 #  
+25 define <strong>_find-android-products-files</strong>  
+26 $(shell test -d vendor && find vendor -maxdepth 6 -name AndroidProducts.mk) \  
+27   $(SRC_TARGET_DIR)/product/AndroidProducts.mk  
+28 endef  
+29   
+30 #  
+31 # Returns the sorted concatenation of all PRODUCT_MAKEFILES  
+32 # variables set in all AndroidProducts.mk files.  
+33 # $(call ) isn't necessary.  
+34 #  
+35 define <strong>get-all-product-makefiles</strong>  
+36 $(sort \  
+37   $(foreach f,$(_find-android-products-files), \  
+38     $(eval PRODUCT_MAKEFILES :=) \  
+39     $(eval LOCAL_DIR := $(patsubst %/,%,$(dir $(f)))) \  
+40     $(eval include $(f)) \  
+41     $(PRODUCT_MAKEFILES) \  
+42    ) \  
+43   $(eval PRODUCT_MAKEFILES :=) \  
+44   $(eval LOCAL_DIR :=) \  
+45  )  
+46 endef  
+通过注释可知，本文件中主要是一些用来处理AndroidProduct.mk的函数
+_find-android-products-files:
+    用来获得vendor目录下，所有名字为AndroidProduct.mk的文件列表。
+get-all-product-makefiles：
+
+    用来获得所有AndroidProduct.mk文件里定义的PRODUCT_MAKEFILES的值（其实是产品文件路径名）。
+
+
+在vendor目录下，每个厂商子目录下都会存在一个AndroidProduct.mk文件，这个文件是用来定义这个厂商的产品列表，每个产品用<product_name>.mk来表示
+如Android给的示例：
+
+[plain] view plaincopy
+vendor/sample/products/AndroidProduct.mk  
+其内容如下：
+[plain] view plaincopy
+ 1 #  
+ 2 # This file should set PRODUCT_MAKEFILES to a list of product makefiles  
+ 3 # to expose to the build system.  LOCAL_DIR will already be set to  
+ 4 # the directory containing this file.   
+ 5 #  
+ 6 # This file may not rely on the value of any variable other than  
+ 7 # LOCAL_DIR; do not use any conditionals, and do not look up the  
+ 8 # value of any variable that isn't set in this file or in a file that  
+ 9 # it includes.  
+10 #  
+11   
+12 PRODUCT_MAKEFILES := \  
+13   $(LOCAL_DIR)/sample_addon.mk  
+里面只定义了一个产品配置文件，即当前目录下的sample_addon.mk：
+[plain] view plaincopy
+1 # List of apps and optional libraries (Java and native) to put in the add-on system image.  
+2 PRODUCT_PACKAGES := \  
+3     PlatformLibraryClient \  
+4     com.example.android.platform_library \  
+5     libplatform_library_jni  
+上述文件里（sample_addon.mk）定义了产品相关个性化信息，如，PRODUCT_PACKAGES表示要在当前产品里添加一些安装包。
+由此可见，get-all-product-makefiles函数，其实就是返回了当前公司里全部的产品对应的mk文件列表。
+
+总结：
+
+如果用户想个性定制自己的产品，应该有以下流程，包含上一节内容：
+
+注：#表示shell提示符
+
+1. 创建厂商目录
+
+    #mkdir vendor/farsight
+
+2. 创建一个vendorsetup.sh文件，将当前产品编译项添加到lunch里，让lunch能找到用户产品编译项
+
+    #echo "add_lunch_combo fs100-eng" > vendor/farsight/vendorsetup.sh
+
+    注：我们增加一个用户产品编译项，fs100-eng
+
+3. 仿着Android示例代码，在厂商目录下创建products目录
+
+    #mkdir -p vendor/farsight/products
+
+4. 仿着Android示例代码，在products目录下创建两个mk文件
+
+    #touch vendor/farsight/products/AndroidProduct.mk   vendor/farsight/products/fs100.mk
+
+    注：其中AndroidProduct.mk是当前厂商产品列表文件，fs100.mk表示当前厂商的一款产品配置文件
+
+在AndroidProduct.mk里添加如下内容：
+
+[plain] view plaincopy
+PRODUCT_MAKEFILES := $(LOCAL_DIR)/fs100.mk  
+   注：表示只有一个产品fs100，它对应的配置文件在当前目录下的fs100.mk。
+5. 在产品配置文件里添加最基本信息
+
+[plain] view plaincopy
+ 1   
+ 2 PRODUCT_PACKAGES := \  
+ 3     IM \  
+ 4     VoiceDialer  
+ 5   
+ 6 $(call inherit-product, build/target/product/generic.mk)  ##从某一默认配置开始派生余下内容参考派生起点  
+ 7   
+ 8 # Overrides  
+ 9 PRODUCT_MANUFACTURER := farsight  
+10 PRODUCT_NAME := fs100  
+11 PRODUCT_DEVICE := fs100  
+一定要注意：
+
+  PRODUCT_NAME：表示产品名字，它要和最终出现的编译项产品名一致，也就是说fs100-eng
+
+  PRODUCT_DEVICE：表示设备名字，它要和将来创建的设备目录名字一致。
+
+///////////////////////////
+
+前面两节讲解了自定义Android编译项和创建Product产品配置文件，除了编译和定义产品相关环境变量外，还需要定义Board相关环境变量。
+
+1. build/core/config.mk
+
+109 # --------------------------------------------------------------- 
+
+110 # Define most of the global variables.  These are the ones that 
+
+111 # are specific to the user's build configuration. 
+
+112 include $(BUILD_SYSTEM)/envsetup.mk 
+
+113  
+
+114 # Boards may be defined under $(SRC_TARGET_DIR)/board/$(TARGET_DEVICE) 
+
+115 # or under vendor/*/$(TARGET_DEVICE).  Search in both places, but 
+
+116 # make sure only one exists. 
+
+117 # Real boards should always be associated with an OEM vendor. 
+
+118 board_config_mk := \ 
+
+119     $(strip $(wildcard \ 
+
+120         $(SRC_TARGET_DIR)/board/$(TARGET_DEVICE)/BoardConfig.mk \ 
+
+121         vendor/*/$(TARGET_DEVICE)/BoardConfig.mk \ 
+
+122     )) 
+
+123 ifeq ($(board_config_mk),) 
+
+124   $(error No config file found for TARGET_DEVICE $(TARGET_DEVICE)) 
+
+125 endif 
+
+126 ifneq ($(words $(board_config_mk)),1) 
+
+127   $(error Multiple board config files for TARGET_DEVICE $(TARGET_DEVICE): $(board_config_mk)) 
+
+128 endif 
+
+129 include $(board_config_mk) 
+
+130 TARGET_DEVICE_DIR := $(patsubst %/,%,$(dir $(board_config_mk))) 
+
+131 board_config_mk := 
+
+上述代码在上一节已经见到过，只是分析了112行的envsetup.mk，根据上一节内容可知，envsetup.mk设置了很多OUT变量，最终在build/core/product_config.mk文件里，设置了TARGET_DEVICE = fs100。
+
+我们从114行继续分析。
+
+从114~117行解释大意可知：
+
+    Board相关配置文件会存在于$(SRC_TARGET_DIR)/board/$(TARGET_DEVICE)/或vendor/*/$(TARGET_DEVICE)/目录中，一个Vendor厂商只能有一个对应的Board配置文件。
+
+118行定义board_config_mk变量：
+
+     $(wildcard xxx)函数就是找到与xxx的匹配项放到空格列表里，前面定义TARGET_DEVICE变量 = fs100，所以$(SRC_TARGET_DIR)/board/fs100/BoardConfig.mk不存在，必须要存在vendor/*/fs1 00/BoardConfig.mk文件来定义开发板配置信息。
+
+129行，通过include将vendor/*/fs100/BoardConfig.mk包含进来，
+
+130行，TARGET_DEVICE_DIR为board_config_mk的路径，即：vendor/*/fs100
+
+总结：
+
+   一个vendor厂商必须要有一个对应的Board配置文件，即：vendor/*/fs100/BoardConfig.mk
+
+    定义TARGET_DEVICE_DIR变量，为board_config_mk的路径，即：vendor/*/fs100
+
+指定board 相关特性,一定要包含:
+      TARGET_CPU_ABI := armeabi/...
+其他属性参见其他board样例.(build/target/board/XXX
+
+2.  build/core/main.mk
+
+141 # Bring in standard build system definitions.
+
+142 include $(BUILD_SYSTEM)/definitions.mk
+
+...
+
+347 ifeq ($(SDK_ONLY),true)
+
+348
+
+349 # ----- SDK for Windows ------
+
+350 # These configure the build targets that are available for the SDK under Cygwin.
+
+351 # The first section defines all the C/C++ tools that can be compiled under Cygwin,
+
+352 # the second section defines all the Java ones (assuming javac is available.)
+
+353
+
+354 subdirs := \
+
+355     prebuilt \
+
+356     build/libs/host \
+
+357     build/tools/zipalign \
+
+...
+
+382 # The following can only be built if "javac" is available.
+
+383 # This check is used when building parts of the SDK under Cygwin.
+
+384 ifneq (,$(shell which javac 2>/dev/null))
+
+385 $(warning sdk-only: javac available.)
+
+386 subdirs += \
+
+387     build/tools/signapk \
+
+388     dalvik/dx \
+
+389     dalvik/libcore \
+
+...
+
+414 else    # !SDK_ONLY
+
+415 ifeq ($(BUILD_TINY_ANDROID), true)
+
+416
+
+417 # TINY_ANDROID is a super-minimal build configuration, handy for board
+
+418 # bringup and very low level debugging
+
+419
+
+420 subdirs := \
+
+421     bionic \
+
+422     system/core \
+
+423     build/libs \
+
+424     build/target \
+
+...
+
+433 else    # !BUILD_TINY_ANDROID
+
+434
+
+435 #
+
+436 # Typical build; include any Android.mk files we can find.
+
+437 #
+
+438 subdirs := $(TOP)
+
+439
+
+440 FULL_BUILD := true
+
+441
+
+442 endif   # !BUILD_TINY_ANDROID
+
+443
+
+444 endif   # !SDK_ONLY
+
+...
+
+464 #
+
+465 # Include all of the makefiles in the system
+
+466 #
+
+467
+
+468 # Can't use first-makefiles-under here because
+
+469 # --mindepth=2 makes the prunes not work.
+
+470 subdir_makefiles := \
+
+471     $(shell build/tools/findleaves.py --prune=out --prune=.repo --prune=.git $(subdirs) Android.mk)
+
+472
+
+473 include $(subdir_makefiles)
+
+上一节只是讲了main.mk第49行中包含了config.mk，我们继续分析。
+
+142行包含了：build/core/definitions.mk，该文件定义了很多全局变量与函数。
+
+如下列常见函数：
+
+    my-dir：返回当前路径
+
+    all-java-files-under：获得指定目录及子目录一所有java文件
+
+    all-subdir-c-files：获得当前目录下及子目录下所有c文件
+
+354~444行，定义了subdirs变量，依据不同的用户编译条件，而包含Android源码中不同的目录。
+
+470行，定义了subdir_makefile变量，其值为subdirs定义的目录中的Android.mk文件。
+
+473行，将所有编译目录中的Android.mk文件包含进来。
+
+3. build/target/board/Android.mk
+
+ 26 ifeq (,$(wildcard $(TARGET_DEVICE_DIR)/AndroidBoard.mk))
+
+ 27   ifeq (,$(wildcard $(TARGET_DEVICE_DIR)/Android.mk))
+
+ 28     $(error Missing "$(TARGET_DEVICE_DIR)/AndroidBoard.mk")
+
+ 29   else
+
+ 30     # TODO: Remove this check after people have had a chance to switch,
+
+ 31     # after April 2009.
+
+ 32     $(error Please rename "$(TARGET_DEVICE_DIR)/Android.mk" to "$(TARGET_DEVICE_DIR)/AndroidBoard.mk")
+
+ 33   endif
+
+ 34 endif
+
+ 35 include $(TARGET_DEVICE_DIR)/AndroidBoard.mk
+
+由于将所有目录中Android.mk文件include进来，build/target/board/Android.mk自然被包含进来，根据前面分析，TARGET_DEVICE_DIR = vendor/*/fs100，其中26~35行用来判断对应的产品目录下是否存在AndrodiBoard.mk，如果不存在，提示出错退出，如果存在，将其包含到编译脚本中。
+
+由此可见：我们必须要在产品目录下创建AndrodiBoard.mk文件，来描述开发板相关配置项，我们可以借鉴：build/target/board/generic/AndroidBoard.mk内容，同时根据前面所分析，还要创建BoardConfig.mk文件。
+
+#cp build/target/board/generic/AndroidBoard.mk build/target/board/generic/BoardConfig.mk  vendor/farsight/fs100/
+
+至此，自定义Android编译选项基本步骤已经分部分析完，细节还需要针对不同开发板具体分析。
+
+总结：
+
+build/core/main.mk包含了config.mk，它主要定义了编译全部代码的依赖关系
+
+      build/core/config.mk         定义了大量的编译脚本命令，编译时用到的环境变量，引入了envsetup.mk 文件，加载board相关配置文件。
+      build/core/envsetup.mk   定义了编译时用到的大量OUT输出目录，加载product_config.mk文件
+      build/core/product_config.mk 定义了Vendor目录下Product相关配置文件解析脚本，读取AndrodProducts.mk生成TARGET_DEVICE变量
+      build/target/product          product config
+      build/target/board            board config
+      build/core/combo             build flags config 
+
+      这里解释下这里的board和product。borad主要是设计到硬件芯片的配置，比如是否提供硬件的某些功能，比如说GPU等等，或者芯片支持浮 点运算等等。product是指针对当前的芯片配置定义你将要生产产品的个性配置，主要是指APK方面的配置，哪些APK会包含在哪个product中，哪些APK在当前product中是不提供的。
+      config.mk是一个总括性的东西，它里面定义了各种module编译所需要使用的HOST工具以及如何来编译各种模块，比如说 BUILT_PREBUILT就定义了如何来编译预编译模块。envsetup.mk主要会读取由envsetup.sh写入环境变量中的一些变量来配置编译过程中的输出目录，combo里面主要定义了各种Host和Target结合的编译器和编译选项。
+
+1. 在vendor目录下创建自己公司目录，然后在公司目录下创建一个新的vendorsetup.sh，在里面添加上自己的产品编译项
+
+#mkdir vendor/farsight/ 
+
+#touch vendor/farsight/vendorsetup.sh 
+
+#echo "add_lunch_combo fs100-eng" > vendor/farsight/vendorsetup.sh 
+
+2. 仿着Android示例代码，在公司目录下创建products目录
+
+ #mkdir -p vendor/farsight/products
+
+3. 仿着Android示例代码，在products目录下创建两个mk文件
+
+#touch vendor/farsight/products/AndroidProduct.mk vendor/farsight/products/fs100.mk
+
+    在AndroidProduct.mk里添加如下内容：
+
+PRODUCT_MAKEFILES := $(LOCAL_DIR)/fs100.mk 
+
+    在产品配置文件里添加最基本信息
+
+ PRODUCT_PACKAGES := \ 
+
+     IM \ 
+
+     VoiceDialer 
+
+  
+
+ $(call inherit-product, build/target/product/generic.mk) 
+
+  
+
+ # Overrides 
+
+ PRODUCT_MANUFACTURER := farsight 
+
+ PRODUCT_NAME := fs100 
+
+ PRODUCT_DEVICE := fs100 
+
+4. 借鉴build/target/board/generic/AndroidBoard.mk和BoardConfig.mk，创建对应文件。
+
+#cp build/target/board/generic/AndroidBoard.mk build/target/board/generic/BoardConfig.mk  vendor/farsight/fs1
