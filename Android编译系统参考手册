@@ -1,0 +1,611 @@
+Android编译系统参考手册
+
+1      Android编译系统参考手册
+ 
+
+1.1.1   作者博客: http://www.cloudchou.com
+1.1.2   build/core/clear_vars.mk
+Clear out values of all variables used by rule templates
+清除LOCAL变量，每个模块的Android.mk，一般会先包含该文件
+变量定义主要出现在base_rules.mk，config.mk，definitions.mk
+
+1.1.3   LOCAL_MODULE
+LOCAL_MODULE表示模块的名称
+   LOCAL_MODULE将在每个模块的makefile里定义，如果未定义，编译系统会报错
+
+1.1.4   LOCAL_MODULE_PATH
+表示模块编译结果将要存放的目录
+    recovery模块的Android.mk里有
+    LOCAL_MODULE := nandroid-md5.sh 
+    LOCAL_MODULE_PATH := $(TARGET_RECOVERY_ROOT_OUT)/sbin 
+    说明：nandroid-md5.sh 将存放于out/Cyanogenmod/target/product/m7ul/recovery/root/sbin
+    如果模块的Android.mk里未定义LOCAL_MODULE_PATH
+    那么LOCAL_MODULE_PATH := $($(my_prefix)OUT$(partition_tag)_$(LOCAL_MODULE_CLASS))
+    在recovery模块里recovery可执行文件相关变量如下：
+    比如my_prefix为TARGET_，partition_tag为空,LOCAL_MODULE_CLASS为EXECUTABLES
+    那么LOCAL_MODULE_PATH为$(TARGET_OUT_EXECUTABLES)，
+    值应该为
+    out/Cyanogenmod/target/product/m7ul/system/bin
+
+1.1.5   LOCAL_MODULE_STEM
+表示编译链接后的目标文件的文件名，不带后缀
+     LOCAL_MODULE_STEM := $(strip $(LOCAL_MODULE_STEM))
+ ifeq ($(LOCAL_MODULE_STEM),)
+     LOCAL_MODULE_STEM := $(LOCAL_MODULE)
+ endif
+ 例：
+   recovery模块编译recovery可执行文件：
+   LOCAL_MODULE_STEM:=recovery
+
+1.1.6   LOCAL_DONT_CHECK_MODULE
+如果定义了该变量，那么模块将不被检查
+ifdef LOCAL_DONT_CHECK_MODULE
+  LOCAL_CHECKED_MODULE :=
+endif
+
+1.1.7   LOCAL_CHECKED_MODULE
+需要检查的模块 
+ifndef LOCAL_CHECKED_MODULE
+  ifndef LOCAL_SDK_VERSION
+    LOCAL_CHECKED_MODULE := $(LOCAL_BUILT_MODULE)
+  endif
+endif
+
+1.1.8   LOCAL_BUILT_MODULE
+表示编译链接后的目标文件(文件路径+文件名)
+  LOCAL_BUILT_MODULE := $(built_module_path)/$(LOCAL_BUILT_MODULE_STEM)
+  比如recovery:
+  LOCAL_BUILT_MODULE 路径；
+  out/Cyanogenmod/target/product/m7ul/obj/EXECUTABLES/recovery_intermediates/recovery
+
+1.1.9   LOCAL_BUILT_MODULE_STEM
+表示编译链接后的目标文件的文件名，带后缀
+LOCAL_BUILT_MODULE_STEM := $(strip $(LOCAL_BUILT_MODULE_STEM))
+ifeq ($(LOCAL_BUILT_MODULE_STEM),)
+  LOCAL_BUILT_MODULE_STEM := $(LOCAL_INSTALLED_MODULE_STEM)
+endif
+例：
+recovery模块编译recovery可执行文件：
+LOCAL_INSTALLED_MODULE_STEM:=recovery
+
+1.1.10               OVERRIDE_BUILT_MODULE_PATH
+只有内部动态链接库模块可以使用OVERRIDE_BUILT_MODULE_PATH    
+    OVERRIDE_BUILT_MODULE_PATH := $(strip $(OVERRIDE_BUILT_MODULE_PATH))
+ifdef OVERRIDE_BUILT_MODULE_PATH
+  ifneq ($(LOCAL_MODULE_CLASS),SHARED_LIBRARIES)
+    $(error $(LOCAL_PATH): Illegal use of OVERRIDE_BUILT_MODULE_PATH)
+  endif
+  built_module_path := $(OVERRIDE_BUILT_MODULE_PATH)
+else
+  built_module_path := $(intermediates)
+endif
+
+1.1.11               LOCAL_INSTALLED_MODULE
+表示模块的安装路径+文件名，存放在安装目录
+ifneq (true,$(LOCAL_UNINSTALLABLE_MODULE))
+ LOCAL_INSTALLED_MODULE := $(LOCAL_MODULE_PATH)/$(LOCAL_INSTALLED_MODULE_STEM)
+  endif
+  示例：
+  out/Cyanogenmod/target/product/m7ul/system/bin/recovery
+
+1.1.12               LOCAL_UNINSTALLABLE_MODULE
+表示该模块是否安装至手机，像sdk文档模块不会被安装至手机，
+ 因此LOCAL_UNINSTALLABLE_MODULE为true
+
+1.1.13               LOCAL_INTERMEDIATE_TARGETS
+Assemble the list of targets to create PRIVATE_ variables for.
+LOCAL_INTERMEDIATE_TARGETS += $(LOCAL_BUILT_MODULE)
+
+1.1.14               LOCAL_UNSTRIPPED_PATH
+没有strip的程序存放路径，通常放在symbols目录
+Instructs the build system to put the unstripped version of the module somewhere 
+other than what's normal for its type. 
+Usually, you override this because you overrode LOCAL_MODULE_PATH for an executable or a shared library.
+If you overrode LOCAL_MODULE_PATH, but not LOCAL_UNSTRIPPED_PATH, an error will occur.
+
+1.1.15               LOCAL_MODULE_CLASS
+将用于决定编译时的中间文件存放的位置
+LOCAL_MODULE_CLASS在定义目标生成方式的makefile文件里定义，
+  比如executable.mk里定义LOCAL_MODULE_CLASS := EXECUTABLES
+在recovery模块的Android.mk里定义的LOCAL_MODULE_CLASS有：
+  LOCAL_MODULE_CLASS := RECOVERY_EXECUTABLES
+  LOCAL_MODULE_CLASS := UTILITY_EXECUTABLES
+其它的LOCAL_MODULE_CLASS有
+ LOCAL_MODULE_CLASS := ETC
+ LOCAL_MODULE_CLASS := STATIC_LIBRARIES
+ LOCAL_MODULE_CLASS := EXECUTABLES
+ LOCAL_MODULE_CLASS := FAKE
+ LOCAL_MODULE_CLASS := JAVA_LIBRARIES
+ LOCAL_MODULE_CLASS := SHARED_LIBRARIES
+ LOCAL_MODULE_CLASS := APPS
+对应 Cyanogenmod/target/product/m7ul/obj 的目录 
+  比如说若 LOCAL_MODULE_CLASS := ETC 
+  那么该模块编译的中间文件将存放于
+  Cyanogenmod/target/product/m7ul/obj/ETC
+
+1.1.16               LOCAL_MODULE_SUFFIX
+表示编译链接后的目标文件的后缀
+
+1.1.17               LOCAL_PACKAGE_NAME
+App名字 
+示例： Dialer, Contacts, etc. 
+This will probably change or go away when we switch to an ant-based build system for the apps.
+
+1.1.18               LOCAL_OVERRIDES_PACKAGES
+Some packages may override others using LOCAL_OVERRIDES_PACKAGE   
+示例：
+  packages/apps/DeskClock/Android.mk:13:LOCAL_OVERRIDES_PACKAGES := AlarmClock
+
+1.1.19               LOCAL_EXPORT_PACKAGE_RESOURCES
+若定义该变量，资源文件打包成一个apk
+示例：
+  frameworks/base/core/res/Android.mk:34:LOCAL_EXPORT_PACKAGE_RESOURCES := true
+
+1.1.20               LOCAL_MANIFEST_PACKAGE_NAME
+在build/core/definitions.mk里inherit-package函数有用到LOCAL_MANIFEST_PACKAGE_NAME 
+
+1.1.21               LOCAL_REQUIRED_MODULES
+本模块依赖的模块
+ Set LOCAL_REQUIRED_MODULES to any number of whitespace-separated module names, like "libblah" or "Email". 
+ If this module is installed, all of the modules that it requires will be installed as well. 
+ This can be used to, e.g., ensure that necessary shared libraries 
+ or providers are installed when a given app is installed
+示例：  
+LOCAL_REQUIRED_MODULES += $(installed_shared_library_module_names)
+
+1.1.22               LOCAL_ACP_UNAVAILABLE
+示例：
+ build/tools/acp/Android.mk:23:LOCAL_ACP_UNAVAILABLE := true
+
+1.1.23               LOCAL_MODULE_TAGS
+模块的tag，为debug eng tests optional samples shell_ash shell_mksh等tag的组合，一个模块可有多个Tag,
+注意现在模块现在不能使用user作为模块的Tag,
+  以前如果使用user做为tag,那么这个模块将被自动安装，
+  如果想定义自动安装的模块，需要在PRODUCT_PACKAGES变量里添加该模块，
+  该变量在build/target/product/base.mk和build/target/product/core.mk里有赋值，这是所有产品都将继承的基础配置
+  另外每个设备可在自己的产品配置文件device_*.mk里设置该变量，添加更多的模块 
+如果当前目录或者父目录有*_GPL*的文件，那么将自动添加gnu的tag
+
+1.1.24               LOCAL_SRC_FILES
+源代码文件集合
+
+1.1.25               LOCAL_PREBUILT_OBJ_FILES
+示例：
+   sdk/find_lock/Android.mk:50:LOCAL_PREBUILT_OBJ_FILES += images/$(FIND_LOCK_ICON_OBJ)
+
+1.1.26               LOCAL_STATIC_JAVA_LIBRARIES
+要链接的Java库，被链接的库将不会安装在手机上，因此会放到链接生成的java包里
+示例：
+ packages/apps/Exchange/Android.mk:24:LOCAL_STATIC_JAVA_LIBRARIES := android-common com.android.emailcommon
+
+1.1.27               LOCAL_STATIC_LIBRARIES
+表示模块要链接的静态库
+   ifneq (,$(filter libcutils libutils,$(LOCAL_STATIC_LIBRARIES)))
+    LOCAL_STATIC_LIBRARIES := $(call insert-liblog,$(LOCAL_STATIC_LIBRARIES))
+  endif
+  示例：external/busybox/Android.mk
+  LOCAL_STATIC_LIBRARIES := libcutils libc libm
+  最终：
+     LOCAL_STATIC_LIBRARIES := libcutils libc libm liblog 
+
+1.1.28               LOCAL_GROUP_STATIC_LIBRARIES
+示例：
+ build/core/binary.mk:223:ifeq (true,$(LOCAL_GROUP_STATIC_LIBRARIES))
+
+1.1.29               LOCAL_WHOLE_STATIC_LIBRARIES
+链接时会将LOCAL_WHOLE_STATIC_LIBRARIES类型的静态链接库的所有目标代码放入最终目标文件里，而不去掉
+These are the static libraries that you want to include in your module without allowing the linker to remove dead code from them. This is mostly useful if you want to add a static library to a shared library and have the static library's content exposed from the shared library.
+ifneq (,$(filter libcutils libutils,$(LOCAL_WHOLE_STATIC_LIBRARIES)))
+  LOCAL_WHOLE_STATIC_LIBRARIES := $(call insert-liblog,$(LOCAL_WHOLE_STATIC_LIBRARIES))
+endif
+示例：
+dalvik/vm/Android.mk
+LOCAL_WHOLE_STATIC_LIBRARIES += libexpat libcutils libdex liblog libz
+最终
+ LOCAL_WHOLE_STATIC_LIBRARIES += libexpat libcutils libdex liblog libz liblog
+
+1.1.30               LOCAL_SHARED_LIBRARIES
+表示模块要链接的动态链接库
+  ifneq (,$(filter libcutils libutils,$(LOCAL_SHARED_LIBRARIES)))
+  LOCAL_SHARED_LIBRARIES := $(call insert-liblog,$(LOCAL_SHARED_LIBRARIES))
+  endif  
+示例：frameworks/av/media/mtp模块
+Android.mk LOCAL_SHARED_LIBRARIES := libutils libcutils libusbhost libbinder
+最终：LOCAL_SHARED_LIBRARIES： libutils liblog libcutils libusbhost libbinder  
+
+1.1.31               LOCAL_IS_HOST_MODULE
+表示该模块是否是将在主机上运行的模块
+
+1.1.32               LOCAL_CC
+你可以通过LOCAL_CC定义一个不同的C编译器
+
+1.1.33               LOCAL_CXX
+你可以通过LOCAL_CXX定义一个不同的C++编译器
+
+1.1.34               LOCAL_CPP_EXTENSION
+当前c++代码文件后缀
+external/protobuf/Android.mk:177:LOCAL_CPP_EXTENSION := .cc
+
+1.1.35               LOCAL_NO_DEFAULT_COMPILER_FLAGS
+通常为C或者C++源代码文件的编译提供了默认的头文件目录和flag，可以通过LOCAL_NO_DEFAULT_COMPILER_FLAGS设置不使用这些东东
+
+1.1.36               LOCAL_NO_FDO_SUPPORT
+示例：
+build/core/binary.mk:136:ifeq ($(strip $(LOCAL_NO_FDO_SUPPORT)),)
+
+1.1.37               LOCAL_ARM_MODE
+示例：
+ndk/tests/build/build-mode/jni/Android.mk:19:LOCAL_ARM_MODE := thumb
+ndk/tests/build/build-mode/jni/Android.mk:32:LOCAL_ARM_MODE := arm  
+
+1.1.38               LOCAL_YACCFLAGS
+Any flags to pass to invocations of yacc for your module. 
+A known limitation here is that the flags will be the same for all invocations of YACC for your module. 
+This can be fixed. If you ever need it to be, just ask.
+LOCAL_YACCFLAGS := -p kjsyy
+
+1.1.39               LOCAL_ASFLAGS
+Explicitly declare assembly-only __ASSEMBLY__ macro for
+assembly source
+  LOCAL_ASFLAGS += -D__ASSEMBLY__
+
+1.1.40               LOCAL_CFLAGS
+表示编译C代码时用的参数
+
+1.1.41               LOCAL_CPPFLAGS
+编译C++代码使用的flag
+ ./frameworks/av/media/libstagefright/Android.mk:78:LOCAL_CPPFLAGS += -DUSE_TI_CUSTOM_DOMX
+
+1.1.42               LOCAL_RTTI_FLAG
+编译C++代码使用rtti标记
+./external/icu4c/common/Android.mk:135:LOCAL_RTTI_FLAG := -frtti
+
+1.1.43               LOCAL_C_INCLUDES
+编译C代码使用的头文件目录
+
+1.1.44               LOCAL_EXPORT_C_INCLUDE_DIRS
+示例：
+system/core/libsuspend/Android.mk:18:LOCAL_EXPORT_C_INCLUDE_DIRS := $(LOCAL_PATH)/include
+
+1.1.45               LOCAL_LDFLAGS
+表示链接时用的参数
+
+1.1.46               LOCAL_LDLIBS
+额外的动态链接库
+LOCAL_LDLIBS allows you to specify additional libraries that are not part of the build for your executable or library. 
+Specify the libraries you want in -lxxx format; they're passed directly to the link line. 
+However, keep in mind that there will be no dependency generated for these libraries.
+It's most useful in simulator builds where you want to use a library preinstalled on the host.
+The linker (ld) is a particularly fussy beast, 
+so it's sometimes necessary to pass other flags here if you're doing something sneaky.
+Some examples:
+LOCAL_LDLIBS += -lcurses -lpthread
+
+1.1.47               LOCAL_AAPT_FLAGS
+使用aapt编译资源包时所用的flag
+packages/apps/Calendar/Android.mk:35:LOCAL_AAPT_FLAGS := --auto-add-overlay
+
+1.1.48               LOCAL_AAPT_INCLUDE_ALL_RESOURCES
+使用AAPT编译时需用的一个标记，打包资源时会用到该比较
+ build/core/package.mk:391:ifeq ($(LOCAL_AAPT_INCLUDE_ALL_RESOURCES),true)
+ packages/inputmethods/LatinIME/java/Android.mk:37:LOCAL_AAPT_INCLUDE_ALL_RESOURCES := true
+
+1.1.49               LOCAL_SYSTEM_SHARED_LIBRARIES
+ifdef LOCAL_IS_HOST_MODULE
+  ifeq ($(LOCAL_SYSTEM_SHARED_LIBRARIES),none)
+LOCAL_SYSTEM_SHARED_LIBRARIES :=
+  endif
+else
+  ifeq ($(LOCAL_SYSTEM_SHARED_LIBRARIES),none)
+LOCAL_SYSTEM_SHARED_LIBRARIES := $(TARGET_DEFAULT_SYSTEM_SHARED_LIBRARIES)
+  endif
+endif
+示例：
+  TARGET_DEFAULT_SYSTEM_SHARED_LIBRARIES：libc libstdc++ libm
+ LOCAL_SYSTEM_SHARED_LIBRARIES：libc libstdc++ libm
+
+1.1.50               LOCAL_PREBUILT_LIBS
+预编译好的库，当使用including $(BUILD_PREBUILT) or $(BUILD_HOST_PREBUILT)
+会将LOCAL_PREBUILT_LIBS所指的库拷贝到安装目录
+
+1.1.51               LOCAL_PREBUILT_EXECUTABLES
+预编译好的可执行程序，一般通过include $(BUILD_PREBUILT)设置
+会将预编译好的程序拷贝直接拷贝至安装目录
+
+1.1.52               LOCAL_PREBUILT_JAVA_LIBRARIES
+示例：
+prebuilts/misc/common/kxml2/Android.mk:19:LOCAL_PREBUILT_JAVA_LIBRARIES := kxml2-2.3.0$(COMMON_JAVA_PACKAGE_SUFFIX)
+
+1.1.53               LOCAL_PREBUILT_STATIC_JAVA_LIBRARIES
+示例：
+packages/apps/CMUpdater/Android.mk:39:LOCAL_PREBUILT_STATIC_JAVA_LIBRARIES := dashclockapi:libs/dashclock-api-r1.1.jar
+
+1.1.54               LOCAL_PREBUILT_STRIP_COMMENTS
+示例：
+build/core/prebuilt.mk:52:  ifneq ($(LOCAL_PREBUILT_STRIP_COMMENTS),)
+
+1.1.55               LOCAL_INTERMEDIATE_SOURCES
+示例：
+frameworks/base/Android.mk:249:LOCAL_INTERMEDIATE_SOURCES := \
+
+1.1.56               LOCAL_INTERMEDIATE_SOURCE_DIR
+表示编译生成的源文件存放目录
+LOCAL_INTERMEDIATE_SOURCE_DIR := $(intermediates.COMMON)/src
+例：out/target/common/obj/EXECUTABLES/recovery_intermediates/src
+
+1.1.57               LOCAL_JAVACFLAGS
+If you have additional flags to pass into the javac compiler, add them here. For example:
+ LOCAL_JAVACFLAGS += -Xlint:deprecation
+
+1.1.58               LOCAL_JAVA_LIBRARIES
+当链接java app程序和库时， LOCAL_JAVA_LIBRARIES指定了哪些java类将被包含，
+目前只有 LOCAL_JAVA_LIBRARIES := core framework
+注意目前编译app设置LOCAL_JAVA_LIBRARIES是不必要的，也不被允许的，在include  $(BUILD_PACKAGE)时
+合适的库都会被包含进来
+
+1.1.59               LOCAL_NO_STANDARD_LIBRARIES
+示例：
+  frameworks/base/Android.mk:254:LOCAL_NO_STANDARD_LIBRARIES := true
+
+1.1.60               LOCAL_CLASSPATH
+示例：
+ external/javassist/Android.mk:21:LOCAL_CLASSPATH := $(HOST_JDK_TOOLS_JAR)
+
+1.1.61               LOCAL_DROIDDOC_USE_STANDARD_DOCLET
+示例：
+device/sample/frameworks/PlatformLibrary/Android.mk:48:LOCAL_DROIDDOC_USE_STANDARD_DOCLET := true
+
+1.1.62               LOCAL_DROIDDOC_SOURCE_PATH
+示例：
+build/core/droiddoc.mk:40:LOCAL_DROIDDOC_SOURCE_PATH := $(LOCAL_PATH)
+
+1.1.63               LOCAL_DROIDDOC_TEMPLATE_DIR
+暂时未见用到
+
+1.1.64               LOCAL_DROIDDOC_CUSTOM_TEMPLATE_DIR
+示例：
+frameworks/base/Android.mk:591:LOCAL_DROIDDOC_CUSTOM_TEMPLATE_DIR:=build/tools/droiddoc/templates-sdk
+
+1.1.65               LOCAL_DROIDDOC_ASSET_DIR
+示例：
+build/core/droiddoc.mk:143:$(full_target): PRIVATE_OUT_ASSET_DIR := $(out_dir)/$(LOCAL_DROIDDOC_ASSET_DIR)
+
+1.1.66               LOCAL_DROIDDOC_CUSTOM_ASSET_DIR
+示例：
+build/tools/droiddoc/test/stubs/Android.mk:25:LOCAL_DROIDDOC_CUSTOM_ASSET_DIR:=assets-google
+
+1.1.67               LOCAL_DROIDDOC_OPTIONS
+示例：
+device/sample/frameworks/PlatformLibrary/Android.mk:46:LOCAL_DROIDDOC_OPTIONS := com.example.android.platform_library
+
+1.1.68               LOCAL_DROIDDOC_HTML_DIR
+示例：
+ frameworks/base/Android.mk:429:framework_docs_LOCAL_DROIDDOC_HTML_DIR := docs/html
+
+1.1.69               LOCAL_ASSET_FILES
+编译Android Package(app)程序时，通常用LOCAL_ASSET_FILES，表示assets目录的所有文件
+通常使用方式：
+LOCAL_ASSET_FILES += $(call find-subdir-assets)   
+
+1.1.70               LOCAL_ASSET_DIR
+编译Android Package(app)程序时，通常用LOCAL_ASSET_FILES，表示assets目录的所有文件
+通常使用方式：
+LOCAL_ASSET_FILES += $(call find-subdir-assets)   
+
+1.1.71               LOCAL_RESOURCE_DIR
+示例：
+  packages/apps/Gallery2/Android.mk:59:LOCAL_RESOURCE_DIR += $(LOCAL_PATH)/res 
+
+1.1.72               LOCAL_JAVA_RESOURCE_DIRS
+示例：
+frameworks/base/tools/layoutlib/bridge/Android.mk:20:LOCAL_JAVA_RESOURCE_DIRS := resources
+
+1.1.73               LOCAL_JAVA_RESOURCE_FILES
+示例：
+  frameworks/base/Android.mk:261:LOCAL_JAVA_RESOURCE_FILES += $(LOCAL_PATH)/preloaded-classes
+
+1.1.74               LOCAL_GENERATED_SOURCES
+编译时生成的源代码文件，像aidl将转为java代码
+
+1.1.75               LOCAL_COPY_HEADERS_TO
+需要拷贝头头文件至哪个安装目录
+
+1.1.76               LOCAL_COPY_HEADERS
+需要拷贝至安装目录的头文件集合，你需要同时定义LOCAL_COPY_HEADERS_TO 
+
+1.1.77               LOCAL_FORCE_STATIC_EXECUTABLE
+强制编译为静态可执行文件，这样在执行时不会去查找动态链接库
+一般只有安装在sbin目录下的可执行文件使用该变量
+如果想程序在recovery下运行，一般都需要添加该变量
+示例：
+   LOCAL_FORCE_STATIC_EXECUTABLE := true
+
+1.1.78               LOCAL_ADDITIONAL_DEPENDENCIES
+额外的依赖
+If your module needs to depend on anything else that isn't actually built in to it,
+you can add those make targets to LOCAL_ADDITIONAL_DEPENDENCIES. 
+Usually this is a workaround for some other dependency that isn't created automatically.
+
+1.1.79               LOCAL_ENABLE_APROF
+编译动态链接库时用到
+
+1.1.80               LOCAL_ENABLE_APROF_JNI
+示例：
+  build/core/shared_library.mk:26:ifeq ($(strip $(LOCAL_ENABLE_APROF_JNI)),true)
+
+1.1.81               LOCAL_COMPRESS_MODULE_SYMBOLS
+暂未见赋值之处
+示例：
+build/core/dynamic_binary.mk:74:ifeq ($(LOCAL_COMPRESS_MODULE_SYMBOLS),true)
+
+1.1.82               LOCAL_STRIP_MODULE
+表示该模块生成的目标是否需要被strip
+   Calculated in base_rules.make to determine if this module should actually be stripped or not,
+   based on whether LOCAL_STRIPPABLE_MODULE is set, and whether the combo is configured to ever strip modules. 
+   With Iliyan's stripping tool, this might change.
+
+1.1.83               LOCAL_JNI_SHARED_LIBRARIES
+示例：
+  packages/inputmethods/LatinIME/java/Android.mk:27:LOCAL_JNI_SHARED_LIBRARIES := libjni_latinime
+
+1.1.84               LOCAL_JNI_SHARED_LIBRARIES_ABI
+暂未见赋值之处 
+示例：
+  build/core/package.mk:346:    jni_shared_libraries_abi := $(LOCAL_JNI_SHARED_LIBRARIES_ABI)
+
+1.1.85               LOCAL_JAR_MANIFEST
+示例：
+  cts/tools/dasm/src/Android.mk:24:LOCAL_JAR_MANIFEST := ../etc/manifest.txt
+
+1.1.86               LOCAL_INSTRUMENTATION_FOR
+示例：
+ packages/apps/Gallery/tests/Android.mk:15:LOCAL_INSTRUMENTATION_FOR := Gallery
+
+1.1.87               LOCAL_MANIFEST_INSTRUMENTATION_FOR
+示例：
+  build/core/definitions.mk:2046:    $(call keep-or-override,LOCAL_MANIFEST_INSTRUMENTATION_FOR,$(patsubst &&%,%,$(word 7,$(_o)))) \
+
+1.1.88               LOCAL_AIDL_INCLUDES
+示例：
+  build/core/base_rules.mk:185:LOCAL_AIDL_INCLUDES += $(FRAMEWORKS_BASE_JAVA_SRC_DIRS)
+
+1.1.89               LOCAL_JARJAR_RULES
+示例：
+  frameworks/base/Android.mk:263:#LOCAL_JARJAR_RULES := $(LOCAL_PATH)/jarjar-rules.txt
+  build/core/java.mk:281:$(full_classes_jarjar_jar): PRIVATE_JARJAR_RULES := $(LOCAL_JARJAR_RULES)
+
+1.1.90               LOCAL_ADDITIONAL_JAVA_DIR
+示例：
+ frameworks/base/Android.mk:738:LOCAL_ADDITIONAL_JAVA_DIR:=$(framework_docs_LOCAL_ADDITIONAL_JAVA_DIR)
+
+1.1.91               LOCAL_ALLOW_UNDEFINED_SYMBOLS
+示例：
+ bionic/libthread_db/Android.mk:27:LOCAL_ALLOW_UNDEFINED_SYMBOLS := false
+
+1.1.92               LOCAL_DX_FLAGS
+用dx处理jar代码的flag
+
+1.1.93               LOCAL_CERTIFICATE
+签名用的证书
+./device/samsung/galaxys2-common/DeviceSettings/Android.mk:11:LOCAL_CERTIFICATE := platform
+
+1.1.94               LOCAL_SDK_VERSION
+build/core/java.mk里定义该变量
+LOCAL_SDK_VERSION := $(PDK_BUILD_SDK_VERSION)
+如果定义了LOCAL_SDK_VERSION，那么需要定义ndk编译相关变量
+因为编译app时，常需要编译jni代码
+示例：LOCAL_SDK_VERSION: 9
+
+1.1.95               LOCAL_SDK_RES_VERSION
+./build/core/static_java_library.mk:62:LOCAL_SDK_RES_VERSION:=$(strip $(LOCAL_SDK_RES_VERSION))
+
+1.1.96               LOCAL_NDK_STL_VARIANT
+./packages/inputmethods/LatinIME/native/jni/Android.mk:97:LOCAL_NDK_STL_VARIANT := stlport_static
+
+1.1.97               LOCAL_EMMA_INSTRUMENT
+使用emma进行覆盖代码测试
+ ./build/core/java_library.mk:54:LOCAL_EMMA_INSTRUMENT := false
+
+1.1.98               LOCAL_PROGUARD_ENABLED
+是否启用混淆
+
+1.1.99               LOCAL_PROGUARD_FLAGS
+混淆使用的flag
+
+1.1.100           LOCAL_PROGUARD_FLAG_FILES
+混淆使用的flag文件
+
+1.1.101           LOCAL_EMMA_COVERAGE_FILTER
+示例：
+  packages/apps/Browser/Android.mk:20:LOCAL_EMMA_COVERAGE_FILTER := *,-com.android.common.*
+
+1.1.102           LOCAL_WARNINGS_ENABLE
+示例：
+  build/core/definitions.mk:1468:    $(if $(findstring true,$(LOCAL_WARNINGS_ENABLE)),$(xlint_unchecked),) \
+
+1.1.103           LOCAL_FULL_MANIFEST_FILE
+示例：
+ build/core/package.mk:63:LOCAL_FULL_MANIFEST_FILE := $(LOCAL_PATH)/$(LOCAL_MANIFEST_FILE)
+
+1.1.104           LOCAL_MANIFEST_FILE
+示例：
+  build/core/package.mk:57:LOCAL_MANIFEST_FILE := AndroidManifest.xml
+
+1.1.105           LOCAL_RENDERSCRIPT_INCLUDES
+示例：
+ frameworks/base/tests/RenderScriptTests/ImageProcessing2/Android.mk:30:LOCAL_RENDERSCRIPT_INCLUDES_OVERRIDE := $(TOPDIR)external/clang/lib/Headers \
+
+1.1.106           LOCAL_RENDERSCRIPT_INCLUDES_OVERRIDE
+示例：
+  frameworks/base/tests/RenderScriptTests/ImageProcessing2/Android.mk:30:LOCAL_RENDERSCRIPT_INCLUDES_OVERRIDE := $(TOPDIR)external/clang/lib/Headers \
+
+1.1.107           LOCAL_RENDERSCRIPT_CC
+示例：
+  build/core/java.mk:161:LOCAL_RENDERSCRIPT_CC := $(LLVM_RS_CC)
+
+1.1.108           LOCAL_RENDERSCRIPT_FLAGS
+示例：
+ frameworks/base/tests/RenderScriptTests/ImageProcessing2/Android.mk:33:LOCAL_RENDERSCRIPT_FLAGS := -rs-package-name=android.support.v8.renderscript
+
+1.1.109           LOCAL_RENDERSCRIPT_TARGET_API
+示例：
+ frameworks/base/tests/RenderScriptTests/ImageProcessing2/Android.mk:29:LOCAL_RENDERSCRIPT_TARGET_API := 17
+
+1.1.110           LOCAL_BUILD_HOST_DEX
+示例：
+   libcore/JavaLibrary.mk:137:LOCAL_BUILD_HOST_DEX := true
+
+1.1.111           LOCAL_DEX_PREOPT
+如果编译模式选择的是user或者userdebug，那么LOCAL_DEX_PREOPT默认为true，这样资源apk和代码文件分离
+成为odex
+ build/core/package.mk:156:LOCAL_DEX_PREOPT := true
+
+1.1.112           LOCAL_PROTOC_OPTIMIZE_TYPE
+示例：
+  hardware/ril/mock-ril/Android.mk:57:LOCAL_PROTOC_OPTIMIZE_TYPE := full
+
+1.1.113           LOCAL_PROTOC_FLAGS
+编译.proto文件使用的flag，暂未见赋值
+ build/core/binary.mk:291:$(proto_generated_cc_sources): PRIVATE_PROTOC_FLAGS := $(LOCAL_PROTOC_FLAGS)
+
+1.1.114           LOCAL_NO_CRT
+示例：
+   bionic/linker/Android.mk:70:LOCAL_NO_CRT := true
+
+1.1.115           LOCAL_PROPRIETARY_MODULE
+是否是设备专有模块
+
+1.1.116           LOCAL_MODULE_OWNER
+示例：
+  vendor/samsung/galaxys2-common/proprietary/Android.mk:21:LOCAL_MODULE_OWNER := samsung
+
+1.1.117           LOCAL_CTS_TEST_PACKAGE
+示例：
+cts/tests/uiautomator/Android.mk:29:LOCAL_CTS_TEST_PACKAGE := android.uiautomator
+
+1.1.118           LOCAL_CTS_TEST_RUNNER
+示例：
+   cts/tests/tests/accessibilityservice/Android.mk:32:LOCAL_CTS_TEST_RUNNER := com.android.cts.tradefed.testtype.AccessibilityServiceTestRunner
+
+1.1.119           LOCAL_CLANG
+表示编译C代码
+
+1.1.120           LOCAL_ADDRESS_SANITIZER
+地址对齐
+
+1.1.121           LOCAL_JAR_EXCLUDE_FILES
+示例：
+     build/core/static_java_library.mk:44:LOCAL_JAR_EXCLUDE_FILES := $(ANDROID_RESOURCE_GENERATED_CLASSES)
+
+1.1.122           LOCAL_LINT_FLAGS
+暂未见赋值之处
+
+1.1.123           LOCAL_SOURCE_FILES_ALL_GENERATED
+LOCAL_SOURCE_FILES_ALL_GENERATED is set only if the module does not have static source files,
+but generated source files in its LOCAL_INTERMEDIATE_SOURCE_DIR
+You have to set up the dependency in some other way.
+
+1.1.124           LOCAL_DONT_DELETE_JAR_META_INF
+示例：
+  cts/tests/core/ctscore.mk:24:LOCAL_DONT_DELETE_JAR_META_INF := true
+  build/core/java.mk:263:$(full_classes_compiled_jar): PRIVATE_DONT_DELETE_JAR_META_INF := $(LOCAL_DONT_DELETE_JAR_META_INF)
