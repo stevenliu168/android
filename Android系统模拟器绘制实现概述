@@ -1,0 +1,250 @@
+https://blog.csdn.net/weixin_33885253/article/details/88961290
+
+Android系统模拟器绘制实现概述
+
+什么是QEMU
+QEMU是一套模拟处理器的开源软件。它与Bochs，PearPC近似，但其具有某些后两者所不具备的特性，如高速度及跨平台的特性。QEMU能模拟整个电脑系统，包括中央处理器及其他周边设备。它使得为系统源代码进行测试及除错工作变得容易。其亦能用来在一部主机上虚拟数部不同虚拟电脑。
+
+Google在开发Android系统的同时，使用qemu开发了针对每个版本的一个模拟器，这大大降低了开发人员的开发成本，便于Android技术的推广。Google使用qemu模拟的是ARM926ej-S的Goldfish处理器，Goldfish是一种虚拟的ARM处理器，在Android的仿真环境中使用。Android模拟器通过运行它来运行arm926t指令集。
+
+在Android源码的device文件下，我们可以看到有各个厂商的名称，还有一个generic目录，上面提到Android中goldfish为我们提供了对于底层硬件的虚拟化，所以对于指令的执行和硬件的操控，在程序执行的时候都会转交到这里来，在该目录下，可以看到有goldfish和goldfish-opengl，对于绘制相关的模拟在系统上层的调用中都会转移到这里。例如OpenGLES和gralloc的相关调用。在这里会对绘制指令进行编码，通过HostConnection来进行数据的传输，这里提供了一个HostConnetion类，这里提供了两种通信方式，一个是QemuPipe，一个是TcpStream的方式进行传输。这里TcpStream实现存在问题，暂时不可使用。到这里指令通过QemuPipe传输到模拟器。模拟器再将接收到的指令转化映射到相应的本地的绘制操作。
+
+模拟器和Android系统绘制
+整体实现流程图
+
+整体实现流程图
+
+系统到模拟器
+系统到模拟器
+
+对于EGL，GLES1.1和GLES2.0的模拟这里会通过QEMU Pipe的方式传输到模拟器。在Android层中的实现，通过将上层的指令转化为一个通用的协议流，然后通过一个叫做QEMU PIPE的高速通道来进行传输，这个管道是通过内核驱动来实现，提供了高速的带宽，可以非常高效的进行读写。当数据通过流写入到设备文件中，然后驱动从中拿到数据之后。绘制指令协议流被模拟器读取之后。
+
+模拟器到RenderThread
+image.png
+
+模拟器接收到指令协议流之后并没有做改变，直接将指令导到Render相关类。
+
+Android模拟器的指令转化
+模拟器指令转化
+
+Android模拟器实现多个转化的库，实现了上层的EGL，GLES。将相应的函数调用转化为正确的宿主机的桌面API调用。
+GLX（Linux），AGL（OS X），WGL（Windows）。OpenGL 2.0来模拟GLES1.1，GLES2.0.
+
+Android系统到模拟器
+在Goldfish-openGL下提供了对于EGL，GLES1.1，GLES2.0的相应的编码类，对于其中实现的每一个方法获取到当前gl_encoder_context持有的IOStream，来将数据写入到流之中来进行通信。对于Android系统和模拟器之间的连接是通过HostConnection来实现的。其中的通信实现采用的是QemuPipe。
+
+Android模拟器实现了一种特殊的虚拟设备类来提供宿主系统和模拟器之间非常快速的通信渠道。该种通道的打开连接方式。
+
+首先打开/dev/qemu_pipe设备来进行读和写操作，从Linux3.10开始，设备被重新命名为/dev/goldfish_pipe，但是和之前的操作还是一样的。
+提供一个零结尾的字符创描述我们所要连接的服务。
+然后通过简单的读写操作便可以和其进行通信。
+fd = open("/dev/qemu_pipe", O_RDWR);
+const char* pipeName = "<pipename>";
+ ret = write(fd, pipeName, strlen(pipeName)+1);
+ if (ret < 0) {
+   //error
+}
+ ... ready to go
+这里的pipeName是要使用的服务名程，这里支持的服务有
+
+tcp:<port>
+提供一个非内部模拟器的NAT router，我们只能使用这个socket进行读写，接受，不能够进行连接非本地socket。
+
+unix:<path>
+打开一个Unix域socket在主机上
+
+opengles
+连接到OpenGL ES模拟进程，现在这个实现等于连接tcp：22468，但是未来可能会改变。
+
+qemud
+连接到qemud服务在模拟器内，这个取代了老版本中通过/dev/ttys1的连接方式.
+在内核中代码，向外提供了一个对于qemu_pipe，其中包含了我们如何与其进行交互。
+
+由于QEMU Pipe发送数据的时候使用的是裸包，其速度要比TCP的方式快很多。
+
+通信协议的实现
+对于指令的传输，要对指令进行编解码。emugen，通过这个工具可以进行编码解码类的生成。在GLES1.1，GLES2.0，EGL之中定义了一些代码生成时，需要用到的文件。用来定义生成代码的文是.types，.in，.attrib。对于EGL的声明则是在renderControl。对于EGL的文件都是以‘renderControl’开头的，这个主要是历史原因，他们调用了gralloc系统的模块来管理图形缓冲区在比EGL更低的级别。
+EGL/GLES函数调用被通过一些规范文件进行描述，这些文件描述了类型，函数签名和它们的一些属性。系统的encoder静态库就是通过这些生成的文件来构建的，它们包含了可以将EGL/GLES命令转化为简单的byte信息的通过IOStream进行发送。
+
+模拟器的绘制
+模拟器接收渲染指令的位置，
+在android/opengles.cpp控制了动态的装载渲染库，和正确的初始化，构建它。host 渲染的库在host/libs/libOpenglRender下，在模拟器opengles下的代码掌管动态装载一些渲染的库。
+
+RendererImpl
+模拟器接收指令渲染的实现在RendererImpl中，对于每一个新来的渲染client，都会通过createRenderChannel来创建一个RenderChannel，然后创建一个RenderThread。
+
+RenderChannelPtr RendererImpl::createRenderChannel() {
+ 
+   const auto channel = std::make_shared<RenderChannelImpl>();
+   std::unique_ptr<RenderThread> rt(RenderThread::create(
+            shared_from_this(), channel));
+ 
+    if (!rt->start()) {
+            fprintf(stderr, "Failed to start RenderThread\n");
+            return nullptr;
+     }
+ 
+    return channel;
+}
+RenderThread相关创建代码
+
+std::unique_ptr<RenderThread> RenderThread::create(
+        std::weak_ptr<RendererImpl> renderer,
+        std::shared_ptr<RenderChannelImpl> channel) {
+    return std::unique_ptr<RenderThread>(
+            new RenderThread(renderer, channel));
+}
+RenderThread::RenderThread(std::weak_ptr<RendererImpl> renderer,
+                           std::shared_ptr<RenderChannelImpl> channel)
+    : emugl::Thread(android::base::ThreadFlags::MaskSignals, 2 * 1024 * 1024),
+      mChannel(channel), mRenderer(renderer) {}
+在RenderThread创建成功之后，调用了其start方法。进入死循环，从ChannelStream之中读取指令流，然后对指令流进行decode操作。
+
+ChannelStream stream(mChannel, RenderChannel::Buffer::KSmallSize);
+ 
+while(1) {
+    initialize decoders
+    //初始化解码部分
+    tInfo.m_glDec.initGL(gles1_dispatch_get_proc_func, NULL);     tInfo.m_gl2Dec.initGL(gles2_dispatch_get_proc_func, NULL);     initRenderControlContext(&tInfo.m_rcDec);
+ 
+    ReadBuffer readBuf(kStreamBufferSize);
+ 
+ 
+    const int stat = readBuf.getData(&stream, packetSize);
+    
+    //尝试通过GLES1解码器来解码指令流
+    size_t last = tInfo.m_glDec.decode(                 readBuf.buf(), readBuf.validData(), &stream, &checksumCalc);
+    if (last > 0) {
+        progress = true;
+        readBuf.consume(last);
+    }
+ 
+ 
+    //尝试通过GLESV2的解码器来进行指令流
+    last = tInfo.m_gl2Dec.decode(readBuf.buf(), readBuf.validData(),
+                                          &stream, &checksumCalc);
+    FrameBuffer::getFB()->unlockContextStructureRead();
+    if (last > 0) {
+        progress = true;
+        readBuf.consume(last);
+    }
+ 
+ 
+    //尝试通过renderControl解码器来进行指令流的解码
+    last = tInfo.m_rcDec.decode(readBuf.buf(), readBuf.validData(),
+                                         &stream, &checksumCalc);
+    if (last > 0) {
+        readBuf.consume(last);
+        progress = true;
+    }
+}
+解码过程，省略部分代码。保留了核心处理代码。
+
+指令流的来源
+上面的指令流处理的数据从ChannelStream中来获取，这里从ChannelStream着手进行分析。
+
+ChannelStream
+我们先来看一下我们的协议流数据从何处而来，从数据读取翻译过程可以看出是来自我们的 ChannelStream，而ChannelStream又是对于Channle的包装。接下来看一下ChannelStream的实现。
+可以看到其是对于RenderChannel的一个包装，同时有两个Buffer。
+
+ChannelStream 实现自IOStream
+class ChannelStream final : public IOStream
+    ChannelStream(std::shared_ptr<RenderChannelImpl> channel, size_t bufSize);
+声明了以下变量
+
+std::shared_ptr<RenderChannelImpl> mChannel;
+RenderChannel::Buffer mWriteBuffer;
+RenderChannel::Buffer mReadBuffer;
+ChannelStream是对于RenderChannel进行了一次包装，对于具体的操作还是交到RenderChannel进行执行，RenderChannel负责在Guest和Host之间的协议数据通信，然后ChannleStream提供了一些buffer在对其封装的基础上，更方便的获取其中的数据，同时由于继承自IOStream，也定义了其中的一些接口，更方便调用。对于数据的读写最终调用了RenderChannel的readFromGuest和writeToGuest，其提供了一个Buffer来方便进行数据的读写。
+
+RenderChannel
+RenderChannel中的数据从哪里而来呢？跟进其几个读写方法，我们便会发现，其具体的执行是交给了mFromGuest和mToGuest，其类型分别为
+
+ BufferQueue mFromGuest;
+ BufferQueue mToGuest;
+通过调用其push，pop方法，从中获取数据，到此，我们可以再继续跟进一下BufferQueue的创建和实现。
+
+BufferQueue
+mFromGuest(kGuestToHostQueueCapacity, mLock),
+mToGuest(kHostToGuestQueueCapacity, mLock)
+BufferQueue模型是Renderchannel的一个先进先出的队列，Buffer实例可以被用在不同的线程之间，其同步原理是在创建的时候，传递了一个锁进去。其内部的buffer利用就是RenderChannel的buffer。对于队列的一些基本操作进行了相应的锁处理。
+
+BufferQueue(size_t capacity, android::base::Lock& lock)
+        : mCapacity(capacity), mBuffers(new Buffer[capacity]), mLock(lock) {}
+这里只是简单地传递数据，确定buffer的大小，同时为其加锁。
+对于Buffer的读写，这里提供了四个关键函数。
+
+tryWrite(Buffer&& buffer)
+mFromGuest.tryPushLocked(std::move(buffer));
+tryRead(Buffer* buffer)
+mToGuest.tryPopLocked(buffer);
+writeToGuest(Buffer&& buffer)
+mToGuest.pushLocked(std::move(buffer));
+readFromGuest(Buffer* buffer, bool blocking)
+mFromGuest.popLocked(buffer);
+在服务器这一端，我们用的到的只有两个函数，这两个函数也是在ChannelStream中做了封装的，分别为
+
+commitBuffer(size_t size)
+mChannel->writeToGuest(std::move(mWriteBuffer));
+readRaw(void buf, size_t inout_len)
+mChannel->readFromGuest(&mReadBuffer, blocking);
+通过write和read函数可以看出是对端在使用的，用来接收从我们的队列之中读数据。
+
+由于Android模拟器端接受绘制渲染指令是通过Qemu Pipe来接收的，所以最开始接收到数据的位置则是管道服务，其实现在EmuglPipe中，在OpenglEsPipe文件中。
+
+auto renderer = android_getOpenglesRenderer();
+if (!renderer) {
+    D("Trying to open the OpenGLES pipe without GPU emulation!");
+     return nullptr;
+ }
+EmuglPipe* pipe = new EmuglPipe(mHwPipe, this, renderer);
+if (!pipe->mIsWorking) {
+      delete pipe;
+       pipe = nullptr;
+ }
+ return pipe;
+获取一个Renderer也就是我们上面提到的用来进行指令转化在本地平台进行绘制的。然后创建一个EmuglPipe实例。
+实例创建的构造函数
+
+ EmuglPipe(void* hwPipe, Service* service,
+              const emugl::RendererPtr& renderer)
+        : AndroidPipe(hwPipe, service) {
+   mChannel = renderer->createRenderChannel();
+   if (!mChannel) {
+       D("Failed to create an OpenGLES pipe channel!");
+       return;
+   }
+   mIsWorking = true;
+   mChannel->setEventCallback([this](RenderChannel::State events) {this->onChannelHostEvent(events);});
+   }
+到此回到了上面最初介绍的Render的createRenderChannel函数。
+
+EmuglPipe提供了几个函数onGuestClose，onGuestPoll,onGuestRecv,onGuestSend等对于Guest读写的回调，当有数据到来或者要写回的时候调用，这个时候就会调用renderChannel来进行指令流的读写。
+
+代码文档位置
+设计文档
+
+qemu/android/docs
+android-emugl/DESIGN
+相关代码
+
+系统端
+
+system/GLESv1_enc -> encoder for GLES 1.1 commands
+system/GLESv2_enc -> encoder for GLES 2.0 commands
+system/renderControl_enc -> encoder for rendering control commands
+system/egl -> emulator-specific guest EGL library
+system/GLESv1 -> emulator-specific guest GLES 1.1 library
+system/gralloc -> emulator-specific gralloc module
+system/OpenglSystemCommon -> library of common routines
+模拟器端
+
+host/libs/GLESv1_dec -> decoder for GLES 1.1 commands
+host/libs/GLESv2_dec -> decoder for GLES 2.0 commands
+host/libs/renderControl_dec -> decoder for rendering control commands
+host/libs/Translator/EGL -> translator for EGL commands
+host/libs/Translator/GLES_CM -> translator for GLES 1.1 commands
+host/libs/Translator/GLES_V2 -> translator for GLES 2.0 commands
+host/libs/Translator/GLcommon -> library of common translation routines
+host/libs/libOpenglRender -> 渲染库 (uses all host libs above)can be used by the 'renderer' program below, or directly linked into the emulator UI program.
+external/qemu/android/android-emu/android/opengl/openglEsPipe/ -- >Qemu Pipe数据接收Renderj建立
