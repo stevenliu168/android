@@ -21,3 +21,11 @@ https://www.jianshu.com/p/1c5fef69897f
 
 Docker是如何实现隔离的 - 爱是与世界平行 - 博客园
 https://www.cnblogs.com/aixing/p/13327152.html
+
+search key:docker run --cpuset-mems=
+
+Docker 容器CPU设置
+https://www.cnblogs.com/sharesdk/p/10110946.html
+
+Docker(二十)-Docker容器CPU、memory资源限制 
+https://www.cnblogs.com/zhuochong/p/9728383.html
