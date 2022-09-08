@@ -1,0 +1,2092 @@
+配置的创建
+  刚才看到CommandScheduler#createConfiguration会根据传进来的参数进行配置的创建，例如执行“run vts -m VtsVndkDependencyTest”命令时，“vts -m VtsVndkDependencyTest”这几个参数就会被传进CommandScheduler#createConfiguration进行配置的创建。
+
+tools/tradefederation/core/src/com/android/tradefed/command/CommandScheduler.java
+
+    private IConfiguration createConfiguration(String[] args) throws ConfigurationException {
+        // check if the command should be sandboxed
+        if (isCommandSandboxed(args)) {
+            // Create an sandboxed configuration based on the sandbox of the scheduler.
+            ISandbox sandbox = createSandbox();
+            return SandboxConfigurationFactory.getInstance()
+                    .createConfigurationFromArgs(args, getKeyStoreClient(), sandbox, new RunUtil());
+        }
+        return getConfigFactory().createConfigurationFromArgs(args, null, getKeyStoreClient());
+    }
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+  createConfigurationFromArgs主要分为两步：1.通过internalCreateConfigurationFromArgs创建一个配置（configuration）；2.通过setOptionsFromCommandLineArgs设置选项（option）的值。
+
+tools/tradefederation/core/src/com/android/tradefed/config/ConfigurationFactory.java
+
+    @Override
+    public IConfiguration createConfigurationFromArgs(String[] arrayArgs,
+            List<String> unconsumedArgs, IKeyStoreClient keyStoreClient)
+            throws ConfigurationException {
+        List<String> listArgs = new ArrayList<String>(arrayArgs.length);
+        // FIXME: Update parsing to not care about arg order.
+        String[] reorderedArrayArgs = reorderArgs(arrayArgs);
+        IConfiguration config =
+                internalCreateConfigurationFromArgs(reorderedArrayArgs, listArgs, keyStoreClient);
+        config.setCommandLine(arrayArgs);
+        if (listArgs.contains("--" + CommandOptions.DRY_RUN_OPTION)) {
+            // In case of dry-run, we replace the KeyStore by a dry-run one.
+            CLog.w("dry-run detected, we are using a dryrun keystore");
+            keyStoreClient = new DryRunKeyStore();
+        }
+        final List<String> tmpUnconsumedArgs = config.setOptionsFromCommandLineArgs(
+                listArgs, keyStoreClient);
+
+        if (unconsumedArgs == null && tmpUnconsumedArgs.size() > 0) {
+            // (unconsumedArgs == null) is taken as a signal that the caller
+            // expects all args to
+            // be processed.
+            throw new ConfigurationException(String.format(
+                    "Invalid arguments provided. Unprocessed arguments: %s", tmpUnconsumedArgs));
+        } else if (unconsumedArgs != null) {
+            // Return the unprocessed args
+            unconsumedArgs.addAll(tmpUnconsumedArgs);
+        }
+
+        return config;
+    }
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+  先看看创建配置的过程。传入的参数的第一个会被作为配置文件的名字（此处“vts -m VtsVndkDependencyTest ”第一个为“vts”,所以第一个加载的配置文件为vts.xml），通过getConfigurationDef来生成一个ConfigurationDef。
+
+tools/tradefederation/core/src/com/android/tradefed/config/ConfigurationFactory.java
+
+    private IConfiguration internalCreateConfigurationFromArgs(String[] arrayArgs,
+            List<String> optionArgsRef, IKeyStoreClient keyStoreClient)
+            throws ConfigurationException {
+        if (arrayArgs.length == 0) {
+            throw new ConfigurationException("Configuration to run was not specified");
+        }
+        final List<String> listArgs = new ArrayList<>(Arrays.asList(arrayArgs));
+        // first arg is config name
+        final String configName = listArgs.remove(0);
+		Log.d(LOG_TAG,"configName:"+configName);
+
+        // Steal ConfigurationXmlParser arguments from the command line
+        final ConfigurationXmlParserSettings parserSettings = new ConfigurationXmlParserSettings();
+        final ArgsOptionParser templateArgParser = new ArgsOptionParser(parserSettings);
+        if (keyStoreClient != null) {
+            templateArgParser.setKeyStore(keyStoreClient);
+        }
+        optionArgsRef.addAll(templateArgParser.parseBestEffort(listArgs));
+        ConfigurationDef configDef = getConfigurationDef(configName, false,
+                parserSettings.templateMap);
+        if (!parserSettings.templateMap.isEmpty()) {
+            // remove the bad ConfigDef from the cache.
+            for (ConfigId cid : mConfigDefMap.keySet()) {
+                if (mConfigDefMap.get(cid) == configDef) {
+                    CLog.d("Cleaning the cache for this configdef");
+                    mConfigDefMap.remove(cid);
+                    break;
+                }
+            }
+            throw new ConfigurationException(String.format("Unused template:map parameters: %s",
+                    parserSettings.templateMap.toString()));
+        }
+        return configDef.createConfiguration();
+    }
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+  可以看到，对于vts.xml，这里是使用了ConfigurationXmlParser#parse进行解析的。
+
+tools/tradefederation/core/src/com/android/tradefed/config/ConfigurationFactory.java
+
+    ConfigurationDef getConfigurationDef(
+            String name, boolean isGlobal, Map<String, String> templateMap)
+            throws ConfigurationException {
+        return new ConfigLoader(isGlobal).getConfigurationDef(name, templateMap);
+    }
+1
+2
+3
+4
+5
+tools/tradefederation/core/src/com/android/tradefed/config/ConfigurationFactory.java
+
+        @Override
+        public ConfigurationDef getConfigurationDef(String name, Map<String, String> templateMap)
+                throws ConfigurationException {
+
+            String configName = name;
+            if (!isBundledConfig(name)) {
+                configName = getAbsolutePath(null, name);
+                // If the config file does not exist in the default location, try to locate it from
+                // test cases directories defined by environment variables.
+                File configFile = new File(configName);
+                if (!configFile.exists()) {
+                    configFile = getTestCaseConfigPath(name);
+                    if (configFile != null) {
+                        configName = configFile.getAbsolutePath();
+                    }
+                }
+            }
+
+            final ConfigId configId = new ConfigId(name, templateMap);
+            ConfigurationDef def = mConfigDefMap.get(configId);
+
+            if (def == null || def.isStale()) {
+                def = new ConfigurationDef(configName);
+                loadConfiguration(configName, def, null, templateMap);
+                mConfigDefMap.put(configId, def);
+            } else {
+                if (templateMap != null) {
+                    // Clearing the map before returning the cached config to
+                    // avoid seeing them as unused.
+                    templateMap.clear();
+                }
+            }
+            return def;
+        }
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+tools/tradefederation/core/src/com/android/tradefed/config/ConfigurationFactory.java
+
+        void loadConfiguration(
+                String name,
+                ConfigurationDef def,
+                String deviceTagObject,
+                Map<String, String> templateMap)
+                throws ConfigurationException {
+            System.out.format("Loading configuration %s\n",name);
+            BufferedInputStream bufStream = getConfigStream(name);
+            ConfigurationXmlParser parser = new ConfigurationXmlParser(this, deviceTagObject);
+            parser.parse(def, name, bufStream, templateMap);
+
+            // Track local config source files
+            if (!isBundledConfig(name)) {
+                def.registerSource(new File(name));
+            }
+        }
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+  解析xml过程如下。
+
+tools/tradefederation/core/src/com/android/tradefed/config/ConfigurationXmlParser.java
+
+    void parse(ConfigurationDef configDef, String name, InputStream xmlInput,
+            Map<String, String> templateMap) throws ConfigurationException {
+        try {
+            SAXParserFactory parserFactory = SAXParserFactory.newInstance();
+            parserFactory.setNamespaceAware(true);
+            SAXParser parser = parserFactory.newSAXParser();
+            ConfigHandler configHandler =
+                    new ConfigHandler(
+                            configDef, name, mConfigDefLoader, mParentDeviceObject, templateMap);
+            parser.parse(new InputSource(xmlInput), configHandler);
+            checkValidMultiConfiguration(configHandler);
+        } catch (ParserConfigurationException e) {
+            throwConfigException(name, e);
+        } catch (SAXException e) {
+            throwConfigException(name, e);
+        } catch (IOException e) {
+            throwConfigException(name, e);
+        }
+    }
+
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+tools/tradefederation/core/src/com/android/tradefed/config/ConfigurationXmlParser.java
+
+        @Override
+        public void startElement(String uri, String localName, String name, Attributes attributes)
+                throws SAXException {
+            if (OBJECT_TAG.equals(localName)) {
+                final String objectTypeName = attributes.getValue("type");
+                if (objectTypeName == null) {
+                    throw new SAXException(new ConfigurationException(
+                            "<object> must have a 'type' attribute"));
+                }
+                if (GlobalConfiguration.isBuiltInObjType(objectTypeName) ||
+                        Configuration.isBuiltInObjType(objectTypeName)) {
+                    throw new SAXException(new ConfigurationException(String.format("<object> "
+                            + "cannot be type '%s' this is a reserved type.", objectTypeName)));
+                }
+                addObject(objectTypeName, attributes);
+            } else if (DEVICE_TAG.equals(localName)) {
+                if (mCurrentDeviceObject != null) {
+                    throw new SAXException(new ConfigurationException(
+                            "<device> tag cannot be included inside another device"));
+                }
+                // tag is a device tag (new format) for multi device definition.
+                String deviceName = attributes.getValue("name");
+                if (deviceName == null) {
+                    throw new SAXException(
+                            new ConfigurationException("device tag requires a name value"));
+                }
+                if (deviceName.equals(ConfigurationDef.DEFAULT_DEVICE_NAME)) {
+                    throw new SAXException(new ConfigurationException(String.format("device name "
+                            + "cannot be reserved name: '%s'",
+                            ConfigurationDef.DEFAULT_DEVICE_NAME)));
+                }
+                if (deviceName.contains(String.valueOf(OptionSetter.NAMESPACE_SEPARATOR))) {
+                    throw new SAXException(new ConfigurationException(String.format("device name "
+                            + "cannot contain reserved character: '%s'",
+                            OptionSetter.NAMESPACE_SEPARATOR)));
+                }
+                isMultiDeviceConfigMode = true;
+                mConfigDef.setMultiDeviceMode(true);
+                mCurrentDeviceObject = deviceName;
+                addObject(localName, attributes);
+            } else if (Configuration.isBuiltInObjType(localName)) {
+                // tag is a built in local config object
+                if (isLocalConfig == null) {
+                    isLocalConfig = true;
+                } else if (!isLocalConfig) {
+                    throwException(String.format(
+                            "Attempted to specify local object '%s' for global config!",
+                            localName));
+                }
+
+                if (mCurrentDeviceObject == null &&
+                        Configuration.doesBuiltInObjSupportMultiDevice(localName)) {
+                    // Keep track of all the BuildInObj outside of device tag for final check
+                    // if it turns out we are in multi mode, we will throw an exception.
+                    mOutsideTag.add(localName);
+                }
+                // if we are inside a device object, some tags are not allowed.
+                if (mCurrentDeviceObject != null) {
+                    if (!Configuration.doesBuiltInObjSupportMultiDevice(localName)) {
+                        // Prevent some tags to be inside of a device in multi device mode.
+                        throw new SAXException(new ConfigurationException(
+                                String.format("Tag %s should not be included in a <device> tag.",
+                                        localName)));
+                    }
+                }
+                addObject(localName, attributes);
+            } else if (GlobalConfiguration.isBuiltInObjType(localName)) {
+                // tag is a built in global config object
+                if (isLocalConfig == null) {
+                    // FIXME: config type should be explicit rather than inferred
+                    isLocalConfig = false;
+                } else if (isLocalConfig) {
+                    throwException(String.format(
+                            "Attempted to specify global object '%s' for local config!",
+                            localName));
+                }
+                addObject(localName, attributes);
+            } else if (OPTION_TAG.equals(localName)) {
+                String optionName = attributes.getValue("name");
+                if (optionName == null) {
+                    throwException("Missing 'name' attribute for option");
+                }
+
+                String optionKey = attributes.getValue("key");
+                // Key is optional at this stage.  If it's actually required, another stage in the
+                // configuration validation will throw an exception.
+
+                String optionValue = attributes.getValue("value");
+                if (optionValue == null) {
+                    throwException("Missing 'value' attribute for option '" + optionName + "'");
+                }
+                if (mCurrentConfigObject != null) {
+                    // option is declared within a config object - namespace it with object class
+                    // name
+                    optionName = String.format("%s%c%s", mCurrentConfigObject,
+                            OptionSetter.NAMESPACE_SEPARATOR, optionName);
+                }
+                if (mCurrentDeviceObject != null) {
+                    // preprend the device name in extra if inside a device config object.
+                    optionName = String.format("{%s}%s", mCurrentDeviceObject, optionName);
+                }
+                mConfigDef.addOptionDef(optionName, optionKey, optionValue, mName);
+            } else if (CONFIG_TAG.equals(localName)) {
+                String description = attributes.getValue("description");
+                if (description != null) {
+                    // Ensure that we only set the description the first time and not when it is
+                    // loading the <include> configuration.
+                    if (mConfigDef.getDescription() == null ||
+                            mConfigDef.getDescription().isEmpty()) {
+                        mConfigDef.setDescription(description);
+                    }
+                }
+            } else if (INCLUDE_TAG.equals(localName)) {
+                String includeName = attributes.getValue("name");
+                if (includeName == null) {
+                    throwException("Missing 'name' attribute for include");
+                }
+                try {
+                    mConfigDefLoader.loadIncludedConfiguration(
+                            mConfigDef, mName, includeName, mCurrentDeviceObject, mTemplateMap);
+                } catch (ConfigurationException e) {
+                    if (e instanceof TemplateResolutionError) {
+                        throwException(String.format(INNER_TEMPLATE_INCLUDE_ERROR,
+                                mConfigDef.getName(), includeName));
+                    }
+                    throw new SAXException(e);
+                }
+            } else if (TEMPLATE_INCLUDE_TAG.equals(localName)) {
+                final String templateName = attributes.getValue("name");
+                if (templateName == null) {
+                    throwException("Missing 'name' attribute for template-include");
+                }
+                if (mCurrentDeviceObject != null) {
+                    // TODO: Add this use case.
+                    throwException("<template> inside device object currently not supported.");
+                }
+
+                String includeName = mTemplateMap.get(templateName);
+                if (includeName == null) {
+                    includeName = attributes.getValue("default");
+                }
+                if (includeName == null) {
+                    throwTemplateException(mConfigDef.getName(), templateName);
+                }
+                // Removing the used template from the map to avoid re-using it.
+                mTemplateMap.remove(templateName);
+                try {
+                    mConfigDefLoader.loadIncludedConfiguration(
+                            mConfigDef, mName, includeName, null, mTemplateMap);
+                } catch (ConfigurationException e) {
+                    if (e instanceof TemplateResolutionError) {
+                        throwException(String.format(INNER_TEMPLATE_INCLUDE_ERROR,
+                                mConfigDef.getName(), includeName));
+                    }
+                    throw new SAXException(e);
+                }
+            } else {
+                throw new SAXException(String.format(
+                        "Unrecognized tag '%s' in configuration", localName));
+            }
+        }
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+58
+59
+60
+61
+62
+63
+64
+65
+66
+67
+68
+69
+70
+71
+72
+73
+74
+75
+76
+77
+78
+79
+80
+81
+82
+83
+84
+85
+86
+87
+88
+89
+90
+91
+92
+93
+94
+95
+96
+97
+98
+99
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+  文字描述比较麻烦，直接拿执行“run vts -m VtsVndkDependencyTest ”命令加载配置过程来说吧。由于run后面的第一个单词是“vts”，所以首先加载的是vts.xml。如果你执行的是“run cts-on-gsi”,那么首先加载的是cts-on-gsi.xml。
+  最外层的标签configuration表明这是一个配置文件。include标签标示会额外引入同目录下的vts-base.xml。option标签用来配置一些实例的参数。例如< option name=“compatibility:include-filter” value=“VtsTrebleVintfTest” />这一项，表示将alias为““compatibility”的类实例的"include-filter"参数设置为"VtsTrebleVintfTest”。
+
+test/vts/tools/vts-tradefed/res/config/vts.xml
+
+<configuration description="VTS Main Test Plan">
+  <include name="vts-base" />
+  <option name="plan" value="vts" />
+  <option name="test-tag" value="vts" />
+  <option name="vts-plan-result:plan-name" value="vts" />
+
+  <option name="compatibility:test-arg" value="com.android.tradefed.testtype.VtsMultiDeviceTest:precondition-vintf-override:true" />
+
+  <!-- For Treble-specific validations -->
+  <option name="compatibility:include-filter" value="VtsTreblePlatformVersionTest" />
+  <option name="compatibility:include-filter" value="VtsTrebleVintfTest" />
+
+  <!-- From vts-hal-hidl.xml -->
+  <option name="compatibility:include-filter" value="VtsHalBluetoothV1_0Target" />
+  <option name="compatibility:include-filter" value="VtsHalBootV1_0Target" />
+  <option name="compatibility:include-filter" value="VtsHalDumpstateV1_0Target" />
+  ...
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+  CompatibilityTest 类使用@OptionClass注解，alias的值对应配置xml里面option项name值冒号前面的部分。部分成员变量参数则使用option标签或者命令行输入设置。 @option注解中，name值表示长命令，用于option中设置参数或者在命令行中使用“–”进行设置；shortname值表示短命令，只能在命令行中使用“-”进行设置；descrition是对该参数项的描述；importance有三个值可选：NEVER（表示不会出现在帮助信息中），IF_UNSET（如果没有默认值的话才会出现在帮助信息中），ALWAYS（总是出现在帮助信息中）。“run vts -m VtsVndkDependencyTest ”这个短命令，我们可以用另外两种方法实现“-m VtsVndkDependencyTest”的效果：1.改用“run vts --module VtsVndkDependencyTest ”命令；2.在任一会加载到的配置xml加上“<option name="compatibility:module value="VtsVndkDependencyTest " />”。
+
+cts/common/host-side/tradefed/src/com/android/compatibility/common/tradefed/testtype/CompatibilityTest.java
+
+@OptionClass(alias = "compatibility")
+public class CompatibilityTest implements IDeviceTest, IShardableTest, IBuildReceiver,
+        IStrictShardableTest, ISystemStatusCheckerReceiver, ITestCollector,
+        IInvocationContextReceiver {
+        ...
+        @Option(name = INCLUDE_FILTER_OPTION,
+        description = "the include module filters to apply.",
+        importance = Importance.ALWAYS)
+        private Set<String> mIncludeFilters = new HashSet<>();
+        ...
+        @Option(name = MODULE_OPTION,
+        shortName = 'm',
+        description = "the test module to run.",
+        importance = Importance.IF_UNSET)
+        private String mModuleName = null;
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+  device_recovery标签指定了一个处理设备进入recovery操作的类；logger标签指定了一个写入log的类；result_reporter标签指定了处理测试结果的类；target_preparer标签指定了预先准备工作的类，该标签里面可以用option子标签为预先准备工作类指定参数值；test标签指定了主测试入口类；build_provider标签指定了设备版本构建信息的提供者类。
+
+test/vts/tools/vts-tradefed/res/config/vts-base.xml
+
+<configuration description="VTS Main Test Plan">
+  <device_recovery class="com.android.tradefed.device.WaitDeviceRecovery" />
+
+  <option name="compatibility:test-arg" value="com.android.tradefed.testtype.AndroidJUnitTest:rerun-from-file:true" />
+  <option name="compatibility:test-arg" value="com.android.tradefed.testtype.AndroidJUnitTest:fallback-to-serial-rerun:false" />
+  <logger class="com.android.tradefed.log.FileLogger">
+    <option name="log-level-display" value="WARN" />
+  </logger>
+  <option name="compatibility:skip-all-system-status-check" value="true" />
+  <option name="max-log-size" value="200" />
+  <object type="vts-vendor-config" class="com.android.tradefed.util.VtsVendorConfigFileUtil" />
+  <result_reporter class="com.android.compatibility.common.tradefed.result.ConsoleReporter" />
+  <result_reporter class="com.android.compatibility.common.tradefed.result.VtsResultReporter" />
+
+  <template-include name="reporters" default="basic-reporters" />
+  <target_preparer class="com.android.tradefed.targetprep.VtsTestPlanResultReporter" />
+  <test class="com.android.compatibility.common.tradefed.testtype.CompatibilityTest" />
+
+  <build_provider class="com.android.compatibility.common.tradefed.build.CompatibilityBuildProvider" />
+  <target_preparer class="com.android.tradefed.targetprep.VtsDeviceInfoCollector" />
+</configuration>
+
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+  由上面解析xml代码，我们可以看到：对于指定了类的标签（如target_preparer，logger等），代码调用的是ConfigurationXmlParser#addObject；对于指定参数值的option标签，代码调用的ConfigurationDef#addOptionDef。
+  先看看ConfigurationXmlParser#addObject，其实是调用了ConfigurationDef#addConfigObjectDef，构建了一个ConfigObjectDef放到mObjectClassMap里面。而ConfigurationDef#addOptionDef则是构建了一个OptionDef放到mOptionList里面。
+
+tools/tradefederation/core/src/com/android/tradefed/config/ConfigurationXmlParser.java
+
+        void addObject(String objectTypeName, Attributes attributes) throws SAXException {
+            if (Configuration.DEVICE_NAME.equals(objectTypeName)) {
+                // We still want to add a standalone device without any inner object.
+                String deviceName = attributes.getValue("name");
+                if (!mListDevice.contains(deviceName)) {
+                    mListDevice.add(deviceName);
+                    mConfigDef.addConfigObjectDef(objectTypeName,
+                            DeviceConfigurationHolder.class.getCanonicalName());
+                    mConfigDef.addExpectedDevice(deviceName);
+                }
+            } else {
+                String className = attributes.getValue("class");
+                if (className == null) {
+                    throwException(String.format("Missing class attribute for object %s",
+                            objectTypeName));
+                }
+                if (mCurrentDeviceObject != null) {
+                    // Add the device name as a namespace to the type
+                    objectTypeName = mCurrentDeviceObject + OptionSetter.NAMESPACE_SEPARATOR
+                            + objectTypeName;
+                }
+                int classCount = mConfigDef.addConfigObjectDef(objectTypeName, className);
+                mCurrentConfigObject = String.format("%s%c%d", className,
+                        OptionSetter.NAMESPACE_SEPARATOR, classCount);
+            }
+        }
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+tools/tradefederation/core/src/com/android/tradefed/config/ConfigurationDef.java
+
+    int addConfigObjectDef(String typeName, String className) {
+        List<ConfigObjectDef> classList = mObjectClassMap.get(typeName);
+        if (classList == null) {
+            classList = new ArrayList<ConfigObjectDef>();
+            mObjectClassMap.put(typeName, classList);
+        }
+
+        // Increment and store count for this className
+        Integer freq = mClassFrequency.get(className);
+        freq = freq == null ? 1 : freq + 1;
+        mClassFrequency.put(className, freq);
+        classList.add(new ConfigObjectDef(className, freq));
+
+        return freq;
+    }
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+tools/tradefederation/core/src/com/android/tradefed/config/ConfigurationDef.java
+
+    void addOptionDef(String optionName, String optionKey, String optionValue,
+            String optionSource) {
+        mOptionList.add(new OptionDef(optionName, optionKey, optionValue, optionSource));
+    }
+1
+2
+3
+4
+  回头看看ConfigurationFactory#internalCreateConfigurationFromArgs函数，在调用getConfigurationDef时会通过读取配置xml生成一个ConfigurationDef，其中配置项指定的类和option指定的项分别保存到mObjectClassMap和mOptionList里面。最终通过ConfigurationDef#createConfiguration生成一个Configuration。
+
+tools/tradefederation/core/src/com/android/tradefed/config/ConfigurationFactory.java
+
+    private IConfiguration internalCreateConfigurationFromArgs(String[] arrayArgs,
+            List<String> optionArgsRef, IKeyStoreClient keyStoreClient)
+            throws ConfigurationException {
+        if (arrayArgs.length == 0) {
+            throw new ConfigurationException("Configuration to run was not specified");
+        }
+        final List<String> listArgs = new ArrayList<>(Arrays.asList(arrayArgs));
+        // first arg is config name
+        final String configName = listArgs.remove(0);
+		Log.d(LOG_TAG,"configName:"+configName);
+
+        // Steal ConfigurationXmlParser arguments from the command line
+        final ConfigurationXmlParserSettings parserSettings = new ConfigurationXmlParserSettings();
+        final ArgsOptionParser templateArgParser = new ArgsOptionParser(parserSettings);
+        if (keyStoreClient != null) {
+            templateArgParser.setKeyStore(keyStoreClient);
+        }
+        optionArgsRef.addAll(templateArgParser.parseBestEffort(listArgs));
+        ConfigurationDef configDef = getConfigurationDef(configName, false,
+                parserSettings.templateMap);
+        if (!parserSettings.templateMap.isEmpty()) {
+            // remove the bad ConfigDef from the cache.
+            for (ConfigId cid : mConfigDefMap.keySet()) {
+                if (mConfigDefMap.get(cid) == configDef) {
+                    CLog.d("Cleaning the cache for this configdef");
+                    mConfigDefMap.remove(cid);
+                    break;
+                }
+            }
+            throw new ConfigurationException(String.format("Unused template:map parameters: %s",
+                    parserSettings.templateMap.toString()));
+        }
+        return configDef.createConfiguration();
+    }
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+  首先是遍历mObjectClassMap的每一项，通过createObject为每一个指定的类通过反射创建一个实例。这些类的实例会被放置到Configuration的实例的mConfigMap成员里面。mConfigMap是一个以xml标签名为键，以元素类型的Object的list为
+值的map，例如有多个target_preparer标签，那么对应的list就会放置这些类的实例的集合。
+
+tools/tradefederation/core/src/com/android/tradefed/config/ConfigurationDef.java
+
+    IConfiguration createConfiguration() throws ConfigurationException {
+        IConfiguration config = new Configuration(getName(), getDescription());
+        List<IDeviceConfiguration> deviceObjectList = new ArrayList<IDeviceConfiguration>();
+        IDeviceConfiguration defaultDeviceConfig =
+                new DeviceConfigurationHolder(DEFAULT_DEVICE_NAME);
+        if (!mMultiDeviceMode) {
+            // We still populate a default device config to avoid special logic in the rest of the
+            // harness.
+            deviceObjectList.add(defaultDeviceConfig);
+        } else {
+            for (String name : mExpectedDevices) {
+                deviceObjectList.add(new DeviceConfigurationHolder(name));
+            }
+        }
+
+        for (Map.Entry<String, List<ConfigObjectDef>> objClassEntry : mObjectClassMap.entrySet()) {
+            List<Object> objectList = new ArrayList<Object>(objClassEntry.getValue().size());
+            String entryName = objClassEntry.getKey();
+            boolean shouldAddToFlatConfig = true;
+
+            for (ConfigObjectDef configDef : objClassEntry.getValue()) {
+                Object configObject = createObject(objClassEntry.getKey(), configDef.mClassName);
+                Matcher matcher = null;
+                if (mMultiDeviceMode) {
+                    matcher = MULTI_PATTERN.matcher(entryName);
+                }
+                if (mMultiDeviceMode && matcher.find()) {
+                    // If we find the device namespace, fetch the matching device or create it if
+                    // it doesn't exists.
+                    IDeviceConfiguration multiDev = null;
+                    shouldAddToFlatConfig = false;
+                    for (IDeviceConfiguration iDevConfig : deviceObjectList) {
+                        if (matcher.group(1).equals(iDevConfig.getDeviceName())) {
+                            multiDev = iDevConfig;
+                            break;
+                        }
+                    }
+                    if (multiDev == null) {
+                        multiDev = new DeviceConfigurationHolder(matcher.group(1));
+                        deviceObjectList.add(multiDev);
+                    }
+                    // We reference the original object to the device and not to the flat list.
+                    multiDev.addSpecificConfig(configObject);
+                    multiDev.addFrequency(configObject, configDef.mAppearanceNum);
+                } else {
+                    if (Configuration.doesBuiltInObjSupportMultiDevice(entryName)) {
+                        defaultDeviceConfig.addSpecificConfig(configObject);
+                        defaultDeviceConfig.addFrequency(configObject, configDef.mAppearanceNum);
+                    } else {
+                        // Only add to flat list if they are not part of multi device config.
+                        objectList.add(configObject);
+                    }
+                }
+            }
+            if (shouldAddToFlatConfig) {
+                config.setConfigurationObjectList(entryName, objectList);
+            }
+        }
+        // We always add the device configuration list so we can rely on it everywhere
+        config.setConfigurationObjectList(Configuration.DEVICE_NAME, deviceObjectList);
+        config.injectOptionValues(mOptionList);
+
+        return config;
+    }
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+58
+59
+60
+61
+62
+63
+64
+tools/tradefederation/core/src/com/android/tradefed/config/ConfigurationDef.java
+
+    private Object createObject(String objectTypeName, String className)
+            throws ConfigurationException {
+        try {
+            Class<?> objectClass = getClassForObject(objectTypeName, className);
+            Object configObject = objectClass.newInstance();
+            return configObject;
+        } catch (InstantiationException e) {
+            throw new ConfigurationException(String.format(
+                    "Could not instantiate class %s for config object type %s", className,
+                    objectTypeName), e);
+        } catch (IllegalAccessException e) {
+            throw new ConfigurationException(String.format(
+                    "Could not access class %s for config object type %s", className,
+                    objectTypeName), e);
+        }
+    }
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+  接下来是injectOptionValues为上面mConfigMap的类实例设置对应的参数。getAllConfigurationObject会从mConfigMap将所有类实例的集合返回，然后以这个集合为参数构造一个OptionSetter。通过internalInjectOptionValue，会将
+mOptionList中保存的option参数设置到对应类实例的参数中去。
+
+tools/tradefederation/core/src/com/android/tradefed/config/Configuration.java
+
+    @Override
+    public void injectOptionValues(List<OptionDef> optionDefs) throws ConfigurationException {
+        OptionSetter optionSetter = createOptionSetter();
+        for (OptionDef optionDef : optionDefs) {
+            internalInjectOptionValue(optionSetter, optionDef.name, optionDef.key, optionDef.value,
+                    optionDef.source);
+        }
+    }
+1
+2
+3
+4
+5
+6
+7
+8
+tools/tradefederation/core/src/com/android/tradefed/config/Configuration.java
+
+    private OptionSetter createOptionSetter() throws ConfigurationException {
+        return new OptionSetter(getAllConfigurationObjects());
+    }
+1
+2
+3
+tools/tradefederation/core/src/com/android/tradefed/config/Configuration.java
+
+    private Collection<Object> getAllConfigurationObjects(String excludedConfigName) {
+        Collection<Object> objectsCopy = new ArrayList<Object>();
+        for (Entry<String, List<Object>> entryList : mConfigMap.entrySet()) {
+            if (excludedConfigName != null) {
+                // Only add if not a descriptor config object type.
+                if (!excludedConfigName.equals(entryList.getKey())) {
+                    objectsCopy.addAll(entryList.getValue());
+                }
+            } else {
+                objectsCopy.addAll(entryList.getValue());
+            }
+        }
+        return objectsCopy;
+    }
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+InvocationThread启动
+  之前提到，执行命令会运行一个InvocationThread线程。可见该线程就是执行了TestInvocation#invoke函数。
+
+tools/tradefederation/core/src/com/android/tradefed/command/CommandScheduler.java
+
+        @Override
+        public void run() {
+            Map<ITestDevice, FreeDeviceState> deviceStates = new HashMap<>();
+            for (ITestDevice device : mInvocationContext.getDevices()) {
+                deviceStates.put(device, FreeDeviceState.AVAILABLE);
+            }
+            mStartTime = System.currentTimeMillis();
+            ITestInvocation instance = getInvocation();
+            IConfiguration config = mCmd.getConfiguration();
+
+            // Copy the command options invocation attributes to the invocation.
+            // TODO: Implement a locking/read-only mechanism to prevent unwanted attributes to be
+            // added during the invocation.
+            if (!config.getCommandOptions().getInvocationData().isEmpty()) {
+                mInvocationContext.addInvocationAttributes(
+                        config.getCommandOptions().getInvocationData());
+            }
+
+            try {
+                mCmd.commandStarted();
+                long invocTimeout = config.getCommandOptions().getInvocationTimeout();
+                if (invocTimeout > 0) {
+                    CLog.i("Setting a timer for the invocation in %sms", invocTimeout);
+                    mExecutionTimer.schedule(mInvocationThreadMonitor, invocTimeout);
+                }
+                instance.invoke(mInvocationContext, config,
+                        new Rescheduler(mCmd.getCommandTracker()), mListeners);
+            } 
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+tools/tradefederation/core/src/com/android/tradefed/invoker/TestInvocation.java
+
+    /** {@inheritDoc} */
+    @Override
+    public void invoke(
+            IInvocationContext context,
+            IConfiguration config,
+            IRescheduler rescheduler,
+            ITestInvocationListener... extraListeners)
+            throws DeviceNotAvailableException, Throwable {
+            ...
+            String cmdLineArgs = config.getCommandLine();
+            if (cmdLineArgs != null) {
+                CLog.i("Invocation was started with cmd: %s", cmdLineArgs);
+            }
+
+            boolean providerSuccess = fetchBuild(context, config, rescheduler, listener);
+            if (!providerSuccess) {
+                return;
+            }
+
+            boolean sharding = shardConfig(config, context, rescheduler);
+            if (sharding) {
+                CLog.i("Invocation for %s has been sharded, rescheduling", context.getSerials());
+                return;
+            }
+
+            if (config.getTests() == null || config.getTests().isEmpty()) {
+                CLog.e("No tests to run");
+                return;
+            }
+
+            performInvocation(config, context, rescheduler, listener);
+            setExitCode(ExitCode.NO_ERROR, null);
+            ...
+    }
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+   最终会调用到TestInvocation#prepareAndRun。可以看到执行分成两步：1.setup阶段；2.runtests阶段。
+
+tools/tradefederation/core/src/com/android/tradefed/invoker/TestInvocation.java
+
+    private void prepareAndRun(
+            IConfiguration config, IInvocationContext context, ITestInvocationListener listener)
+            throws Throwable {
+        if (config.getCommandOptions().shouldUseSandboxing()) {
+            // TODO: extract in new TestInvocation type.
+            // If the invocation is sandboxed run as a sandbox instead.
+            SandboxInvocationRunner.prepareAndRun(config, context, listener);
+            return;
+        }
+        getRunUtil().allowInterrupt(true);
+        logDeviceBatteryLevel(context, "initial -> setup");
+        doSetup(context, config, listener);
+        logDeviceBatteryLevel(context, "setup -> test");
+        runTests(context, config, listener);
+        logDeviceBatteryLevel(context, "after test");
+    }
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+setup阶段
+  setup阶段就是将收集到的target_preparer和multi_target_preparer的实例，分别运行它们的setUp函数。
+
+tools/tradefederation/core/src/com/android/tradefed/invoker/TestInvocation.java
+
+    @Override
+    public void doSetup(
+            IInvocationContext context,
+            IConfiguration config,
+            final ITestInvocationListener listener)
+            throws TargetSetupError, BuildError, DeviceNotAvailableException {
+        // TODO: evaluate doing device setup in parallel
+        for (String deviceName : context.getDeviceConfigNames()) {
+            ITestDevice device = context.getDevice(deviceName);
+            CLog.d("Starting setup for device: '%s'", device.getSerialNumber());
+            if (device instanceof ITestLoggerReceiver) {
+                ((ITestLoggerReceiver) context.getDevice(deviceName))
+                        .setTestLogger(listener);
+            }
+            if (!config.getCommandOptions().shouldSkipPreDeviceSetup()) {
+                device.preInvocationSetup(context.getBuildInfo(deviceName));
+            }
+            for (ITargetPreparer preparer : config.getDeviceConfigByName(deviceName)
+                    .getTargetPreparers()) {
+                if (preparer instanceof ITestLoggerReceiver) {
+                    ((ITestLoggerReceiver) preparer).setTestLogger(listener);
+                }
+                CLog.d(
+                        "starting preparer '%s' on device: '%s'",
+                        preparer, device.getSerialNumber());
+                preparer.setUp(device, context.getBuildInfo(deviceName));
+                CLog.d(
+                        "done with preparer '%s' on device: '%s'",
+                        preparer, device.getSerialNumber());
+            }
+            CLog.d("Done with setup of device: '%s'", device.getSerialNumber());
+        }
+        // After all the individual setup, make the multi-devices setup
+        for (IMultiTargetPreparer multipreparer : config.getMultiTargetPreparers()) {
+            if (multipreparer instanceof ITestLoggerReceiver) {
+                ((ITestLoggerReceiver) multipreparer).setTestLogger(listener);
+            }
+            CLog.d("Starting multi target preparer '%s'", multipreparer);
+            multipreparer.setUp(context);
+            CLog.d("done with multi target preparer '%s'", multipreparer);
+        }
+        if (config.getProfiler() != null) {
+            config.getProfiler().setUp(context);
+        }
+        // Upload setup logcat after setup is complete
+        for (String deviceName : context.getDeviceConfigNames()) {
+            reportLogs(context.getDevice(deviceName), listener, Stage.SETUP);
+        }
+    }
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+  举个例子，vts-base.xml里面指定了一个target_preparer类： com.android.tradefed.targetprep.VtsDeviceInfoCollector。它的setup函数会记录一些设备的ro属性例如ro.product.device，ro.product.cpu.abilist等等到设备的buildinfo里面。
+
+test/vts/harnesses/tradefed/src/com/android/tradefed/targetprep/VtsDeviceInfoCollector.java
+
+    @Override
+    public void setUp(ITestDevice device, IBuildInfo buildInfo) throws TargetSetupError,
+            BuildError, DeviceNotAvailableException {
+        for (Entry<String, String> entry : BUILD_KEYS.entrySet()) {
+            buildInfo.addBuildAttribute(entry.getKey(),
+                    ArrayUtil.join(",", device.getProperty(entry.getValue())));
+        }
+    }
+1
+2
+3
+4
+5
+6
+7
+8
+runtests阶段
+  runtests阶段就是收集配置中的test标签记录的类实例，执行它们的run函数：
+
+tools/tradefederation/core/src/com/android/tradefed/invoker/TestInvocation.java
+
+    @VisibleForTesting
+    void runTests(
+            IInvocationContext context, IConfiguration config, ITestInvocationListener listener)
+            throws DeviceNotAvailableException {
+        // Wrap collectors in each other and collection will be sequential
+        for (IMetricCollector collector : config.getMetricCollectors()) {
+            listener = collector.init(context, listener);
+        }
+
+        for (IRemoteTest test : config.getTests()) {
+            // For compatibility of those receivers, they are assumed to be single device alloc.
+            if (test instanceof IDeviceTest) {
+                ((IDeviceTest)test).setDevice(context.getDevices().get(0));
+            }
+            if (test instanceof IBuildReceiver) {
+                ((IBuildReceiver)test).setBuild(context.getBuildInfo(
+                        context.getDevices().get(0)));
+            }
+            if (test instanceof ISystemStatusCheckerReceiver) {
+                ((ISystemStatusCheckerReceiver) test).setSystemStatusChecker(
+                        config.getSystemStatusCheckers());
+            }
+
+            // TODO: consider adding receivers for only the list of ITestDevice and IBuildInfo.
+            if (test instanceof IMultiDeviceTest) {
+                ((IMultiDeviceTest)test).setDeviceInfos(context.getDeviceBuildMap());
+            }
+            if (test instanceof IInvocationContextReceiver) {
+                ((IInvocationContextReceiver)test).setInvocationContext(context);
+            }
+            test.run(listener);
+        }
+    }
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+  鉴于在本例中的test标签对应的类是com.android.compatibility.common.tradefed.testtype.CompatibilityTest，看看它的run函数，简单地分成两步：1.initializeModuleRepo初始化模块；2.分别调用符合条件的模块（ModuleDef）的run函数。
+
+cts/common/host-side/tradefed/src/com/android/compatibility/common/tradefed/testtype/CompatibilityTest.java
+
+    @Override
+    public void run(ITestInvocationListener listener) throws DeviceNotAvailableException {
+            ...
+            LinkedList<IModuleDef> modules = initializeModuleRepo();
+            ...
+            while (!modules.isEmpty()) {
+                // Make sure we remove the modules from the reference list when we are done with
+                // them.
+                IModuleDef module = modules.poll();
+                long start = System.currentTimeMillis();
+
+                if (mRebootPerModule) {
+                    if ("user".equals(mDevice.getProperty("ro.build.type"))) {
+                        CLog.e("reboot-per-module should only be used during development, "
+                            + "this is a\" user\" build device");
+                    } else {
+                        CLog.logAndDisplay(LogLevel.INFO, "Rebooting device before starting next "
+                            + "module");
+                        mDevice.reboot();
+                    }
+                }
+                try {
+                    module.run(listener);
+                } catch (DeviceUnresponsiveException due) {
+                ...
+    }
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+模块初始化
+  initializeModuleRepo会根据事先在命令行或者xml option选项的设置对CompatibilityTests参数的设定进行初始化。初始化过程为：首先遍历VTS套件的testcase目录（vts/android-vts/testcases）下的所有.config文件，对于可用的abi集合（一般为arm64-v8a和armeabi-v7a），都会根据.config文件前缀名和abi名通过AbiUtils#createId构建一个id，通过shouldRunModule函数来判断当前的id对应的模块（ModuleDef）是否需要跑。如果不需要，则continue直接跳过。
+  如果当前id对应的模块需要进行测试，则会先通过ConfigurationFactory#createConfigurationFromArgs创建一个配置（configuration）。以我们运行的命令“run vts -m VtsVndkDependencyTest”为例，对应的config文件位于android-vts/testcases/VtsVndkDependencyTest.config。
+  最后通过addModuleDef添加一个模块（ModuleDef）。
+
+cts/common/host-side/tradefed/src/com/android/compatibility/common/tradefed/testtype/CompatibilityTest.java
+
+    protected LinkedList<IModuleDef> initializeModuleRepo()
+            throws DeviceNotAvailableException, FileNotFoundException {
+        // FIXME: Each shard will do a full initialization which is not optimal. Need a way
+        // to be more specific on what to initialize.
+        synchronized (mModuleRepo) {
+            if (!mModuleRepo.isInitialized()) {
+                setupFilters();
+                // Initialize the repository, {@link CompatibilityBuildHelper#getTestsDir} can
+                // throw a {@link FileNotFoundException}
+                mModuleRepo.initialize(mTotalShards, mShardIndex, mBuildHelper.getTestsDir(),
+                        getAbis(), mDeviceTokens, mTestArgs, mModuleArgs, mIncludeFilters,
+                        mExcludeFilters, mModuleMetadataIncludeFilter, mModuleMetadataExcludeFilter,
+                        mBuildHelper.getBuildInfo());
+
+                // Add the entire list of modules to the CompatibilityBuildHelper for reporting
+                mBuildHelper.setModuleIds(mModuleRepo.getModuleIds());
+
+                int count = UniqueModuleCountUtil.countUniqueModules(mModuleRepo.getTokenModules())
+                        + UniqueModuleCountUtil.countUniqueModules(
+                                  mModuleRepo.getNonTokenModules());
+                CLog.logAndDisplay(LogLevel.INFO, "========================================");
+                CLog.logAndDisplay(LogLevel.INFO, "Starting a run with %s unique modules.", count);
+                CLog.logAndDisplay(LogLevel.INFO, "========================================");
+            } else {
+                CLog.d("ModuleRepo already initialized.");
+            }
+            // Get the tests to run in this shard
+            return mModuleRepo.getModules(getDevice().getSerialNumber(), mShardIndex);
+        }
+    }
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+cts/common/host-side/tradefed/src/com/android/compatibility/common/tradefed/testtype/ModuleRepo.java
+
+    @Override
+    public void initialize(int totalShards, Integer shardIndex, File testsDir, Set<IAbi> abis,
+            List<String> deviceTokens, List<String> testArgs, List<String> moduleArgs,
+            Set<String> includeFilters, Set<String> excludeFilters,
+            MultiMap<String, String> metadataIncludeFilters,
+            MultiMap<String, String> metadataExcludeFilters,
+            IBuildInfo buildInfo) {
+        CLog.d("Initializing ModuleRepo\nShards:%d\nTests Dir:%s\nABIs:%s\nDevice Tokens:%s\n" +
+                "Test Args:%s\nModule Args:%s\nIncludes:%s\nExcludes:%s",
+                totalShards, testsDir.getAbsolutePath(), abis, deviceTokens, testArgs, moduleArgs,
+                includeFilters, excludeFilters);
+        mInitialized = true;
+        mTotalShards = totalShards;
+        mShardIndex = shardIndex;
+        synchronized (lock) {
+            if (mTokenModuleScheduled == null) {
+                mTokenModuleScheduled = new HashSet<>();
+            }
+        }
+
+        for (String line : deviceTokens) {
+            String[] parts = line.split(":");
+            if (parts.length == 2) {
+                String key = parts[0];
+                String value = parts[1];
+                Set<String> list = mDeviceTokens.get(key);
+                if (list == null) {
+                    list = new HashSet<>();
+                    mDeviceTokens.put(key, list);
+                }
+                list.add(value);
+            } else {
+                throw new IllegalArgumentException(
+                        String.format("Could not parse device token: %s", line));
+            }
+        }
+        putArgs(testArgs, mTestArgs);
+        putArgs(moduleArgs, mModuleArgs);
+        mIncludeAll = includeFilters.isEmpty();
+        // Include all the inclusions
+        addFilters(includeFilters, mIncludeFilters, abis);
+        // Exclude all the exclusions
+        addFilters(excludeFilters, mExcludeFilters, abis);
+
+        File[] configFiles = testsDir.listFiles(new ConfigFilter());
+        if (configFiles.length == 0) {
+            throw new IllegalArgumentException(
+                    String.format("No config files found in %s", testsDir.getAbsolutePath()));
+        }
+        Map<String, Integer> shardedTestCounts = new HashMap<>();
+        for (File configFile : configFiles) {
+            final String name = configFile.getName().replace(CONFIG_EXT, "");
+            final String[] pathArg = new String[] { configFile.getAbsolutePath() };
+            try {
+                // Invokes parser to process the test module config file
+                // Need to generate a different config for each ABI as we cannot guarantee the
+                // configs are idempotent. This however means we parse the same file multiple times
+                for (IAbi abi : abis) {
+                    String id = AbiUtils.createId(abi.getName(), name);
+                    if (!shouldRunModule(id)) {
+                        // If the module should not run tests based on the state of filters,
+                        // skip this name/abi combination.
+                        continue;
+                    }
+
+                    IConfiguration config = mConfigFactory.createConfigurationFromArgs(pathArg);
+                    if (!filterByConfigMetadata(config,
+                            metadataIncludeFilters, metadataExcludeFilters)) {
+                        // if the module config did not pass the metadata filters, it's excluded
+                        // from execution
+                        continue;
+                    }
+                    Map<String, List<String>> args = new HashMap<>();
+                    if (mModuleArgs.containsKey(name)) {
+                        args.putAll(mModuleArgs.get(name));
+                    }
+                    if (mModuleArgs.containsKey(id)) {
+                        args.putAll(mModuleArgs.get(id));
+                    }
+                    injectOptionsToConfig(args, config);
+
+                    List<IRemoteTest> tests = config.getTests();
+                    for (IRemoteTest test : tests) {
+                        prepareTestClass(name, abi, config, test);
+                    }
+                    List<IRemoteTest> shardedTests = tests;
+                    if (mTotalShards > 1) {
+                         shardedTests = splitShardableTests(tests, buildInfo);
+                    }
+                    if (shardedTests.size() > 1) {
+                        shardedTestCounts.put(id, shardedTests.size());
+                    }
+                    for (IRemoteTest test : shardedTests) {
+                        addModuleDef(name, abi, test, pathArg);
+                    }
+                }
+            } catch (ConfigurationException e) {
+                throw new RuntimeException(String.format("error parsing config file: %s",
+                        configFile.getName()), e);
+            }
+        }
+        mExcludeFilters.clear();
+        TestRunHandler.setTestRuns(new CompatibilityBuildHelper(buildInfo), shardedTestCounts);
+    }
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+58
+59
+60
+61
+62
+63
+64
+65
+66
+67
+68
+69
+70
+71
+72
+73
+74
+75
+76
+77
+78
+79
+80
+81
+82
+83
+84
+85
+86
+87
+88
+89
+90
+91
+92
+93
+94
+95
+96
+97
+98
+99
+100
+101
+102
+103
+104
+cts/common/host-side/tradefed/src/com/android/compatibility/common/tradefed/testtype/ModuleRepo.java
+
+    protected void addModuleDef(String name, IAbi abi, IRemoteTest test, String[] configPaths)
+            throws ConfigurationException {
+        // Invokes parser to process the test module config file
+        IConfiguration config = mConfigFactory.createConfigurationFromArgs(configPaths);
+        addModuleDef(new ModuleDef(name, abi, test, config.getTargetPreparers(),
+                config.getConfigurationDescription()));
+    }
+1
+2
+3
+4
+5
+6
+7
+cts/common/host-side/tradefed/src/com/android/compatibility/common/tradefed/testtype/ModuleRepo.java
+
+    protected void addModuleDef(IModuleDef moduleDef) {
+        Set<String> tokens = moduleDef.getTokens();
+        if (tokens != null && !tokens.isEmpty()) {
+            mTokenModules.add(moduleDef);
+        } else {
+            mNonTokenModules.add(moduleDef);
+        }
+    }
+1
+2
+3
+4
+5
+6
+7
+8
+模块运行
+  ModuleDef#run主要分成两步：1.runPreparerSetups用来执行收集到的target_preparer的setup函数；2.执行test标签的测试类的实例的run函数。
+
+cts/common/host-side/tradefed/src/com/android/compatibility/common/tradefed/testtype/ModuleDef.java
+
+    @Override
+    public void run(ITestInvocationListener listener) throws DeviceNotAvailableException {
+        CLog.d("Running module %s", toString());
+        runPreparerSetups();
+
+        CLog.d("Test: %s", mTest.getClass().getSimpleName());
+        prepareTestClass();
+
+        IModuleListener moduleListener = new ModuleListener(this, listener);
+        // Guarantee events testRunStarted and testRunEnded in case underlying test runner does not
+        ModuleFinisher moduleFinisher = new ModuleFinisher(moduleListener);
+        mTest.run(moduleFinisher);
+        moduleFinisher.finish();
+
+        // Tear down
+        runPreparerTeardowns();
+    }
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+  以“run vts -m VtsVndkDependencyTest”命令对应的为例。target_preparer分别有VtsFilePusher（用来push文件到设备里面）和VtsPythonVirtualenvPreparer（初始化python环境）。test主测试类为VtsMultiDeviceTest，并指定了测试python模块文件在"vts/testcases/vndk/dependency/VtsVndkDependencyTest"。
+
+android-vts/testcases/VtsVndkDependencyTest.config
+
+<configuration description="Config for VTS VNDK dependency test cases">
+    <target_preparer class="com.android.compatibility.common.tradefed.targetprep.VtsFilePusher">
+        <option name="push-group" value="HostDrivenTest.push" />
+    </target_preparer>
+    <target_preparer class="com.android.tradefed.targetprep.VtsPythonVirtualenvPreparer">
+    </target_preparer>
+    <test class="com.android.tradefed.testtype.VtsMultiDeviceTest">
+        <option name="test-module-name" value="VtsVndkDependencyTest" />
+        <option name="test-case-path" value="vts/testcases/vndk/dependency/VtsVndkDependencyTest" />
+    </test>
+</configuration>
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+  VtsMultiDeviceTest使用“python -m python文件路径”的方法来执行python测试模块。
+
+test/vts/harnesses/tradefed/src/com/android/tradefed/testtype/VtsMultiDeviceTest.java
+
+    @SuppressWarnings("deprecation")
+    @Override
+    public void run(ITestInvocationListener listener)
+            throws IllegalArgumentException, DeviceNotAvailableException {
+        if (mDevice == null) {
+            throw new DeviceNotAvailableException("Device has not been set");
+        }
+
+        if (mTestCasePath == null) {
+            if (!mBinaryTestSource.isEmpty()) {
+                String template;
+                switch (mBinaryTestType) {
+                    case BINARY_TEST_TYPE_GTEST:
+                        template = TEMPLATE_GTEST_BINARY_TEST_PATH;
+                        break;
+                    case BINARY_TEST_TYPE_HAL_HIDL_GTEST:
+                        template = TEMPLATE_HAL_HIDL_GTEST_PATH;
+                        break;
+                    case BINARY_TEST_TYPE_HOST_BINARY_TEST:
+                        template = TEMPLATE_HOST_BINARY_TEST_PATH;
+                        break;
+                    default:
+                        template = TEMPLATE_BINARY_TEST_PATH;
+                }
+                CLog.i("Using default test case template at %s.", template);
+                setTestCasePath(template);
+                if (mEnableCoverage && !mGlobalCoverage) {
+                    CLog.e("Only global coverage is supported for test type %s.", mBinaryTestType);
+                    throw new RuntimeException("Failed to produce VTS runner test config");
+                }
+            } else if (mBinaryTestType.equals(BINARY_TEST_TYPE_HAL_HIDL_REPLAY_TEST)) {
+                setTestCasePath(TEMPLATE_HAL_HIDL_REPLAY_TEST_PATH);
+            } else if (mBinaryTestType.equals(BINARY_TEST_TYPE_LLVMFUZZER)) {
+                // Fuzz test don't need test-case-path.
+                setTestCasePath(TEMPLATE_LLVMFUZZER_TEST_PATH);
+            } else {
+                throw new IllegalArgumentException("test-case-path is not set.");
+            }
+        }
+
+        setPythonPath();
+
+        if (mPythonBin == null) {
+            mPythonBin = getPythonBinary();
+        }
+
+        if (mRunUtil == null){
+            mRunUtil = new RunUtil();
+            mRunUtil.setEnvVariable(PYTHONPATH, mPythonPath);
+        }
+
+        doRunTest(listener);
+    }
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+————————————————
