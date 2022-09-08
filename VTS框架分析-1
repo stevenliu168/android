@@ -1,0 +1,727 @@
+https://blog.csdn.net/Invoker123/article/details/90338919
+
+VTS框架分析
+
+Invoker123
+
+于 2019-05-26 20:13:29 发布
+
+4151
+ 收藏 6
+分类专栏： Framework
+版权
+
+Framework
+专栏收录该内容
+27 篇文章13 订阅
+订阅专栏
+CompatibilityConsole初始化
+  VTS测试套件的执行脚本是通过直接加载com.android.compatibility.common.tradefed.command.CompatibilityConsole来进入交互命令行的：
+
+android-vts/tools/vts-tradefed
+
+cd ${VTS_ROOT}/android-vts/testcases/; java $RDBG_FLAG -cp ${JAR_PATH} -DVTS_ROOT=${VTS_ROOT} com.android.compatibility.common.tradefed.command.CompatibilityConsole "$@"
+1
+  CompatibilityConsole的main函数(以下源码基于Android8.1：
+
+cts/common/host-side/tradefed/src/com/android/compatibility/common/tradefed/command/CompatibilityConsole.java
+
+    public static void main(String[] args) throws InterruptedException, ConfigurationException {
+        Console console = new CompatibilityConsole();
+        Console.startConsole(console, args);
+    }
+1
+2
+3
+4
+  CompatibilityConsole类继承自Console类，在Console的构造函数里会初始化命令正则表达式匹配规则。其中addDefaultCommands提供了内置命令的匹配规则；setCustomCommands提供了自定义命令的匹配规则，目前实现为空；
+generateHelpListings提供了帮助命令的匹配规则。
+
+tools/tradefederation/core/src/com/android/tradefed/command/Console.java
+
+    protected Console() {
+        this(getReader());
+    }
+
+    /**
+     * Create a {@link Console} with provided console reader.
+     * Also, set up console command handling.
+     * <p/>
+     * Exposed for unit testing
+     */
+    Console(ConsoleReader reader) {
+        super("TfConsole");
+        mConsoleStartTime = System.currentTimeMillis();
+        mConsoleReader = reader;
+        if (reader != null) {
+            mConsoleReader.addCompletor(
+                    new ConfigCompletor(getConfigurationFactory().getConfigList()));
+        }
+
+        List<String> genericHelp = new LinkedList<String>();
+        Map<String, String> commandHelp = new LinkedHashMap<String, String>();
+        addDefaultCommands(mCommandTrie, genericHelp, commandHelp);
+        setCustomCommands(mCommandTrie, genericHelp, commandHelp);
+        generateHelpListings(mCommandTrie, genericHelp, commandHelp);
+    }
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+  以常用的run命令(run vts …)举个例子。run命令对应一个ArgRunnable，run或run command后面的参数会通过CommandScheduler#addCommand添加到CommandScheduler等待处理。一个命令表达式对应一个Runnable或者ArgRunnable，像“run”，“run command”和“set log-level-display”这种命令后面还需要加上额外参数的就对应一个ArgRunnable；像“list commands”这种不需要额外参数的就对应一个Runnable。
+
+tools/tradefederation/core/src/com/android/tradefed/command/Console.java
+
+        // Run commands
+        ArgRunnable<CaptureList> runRunCommand = new ArgRunnable<CaptureList>() {
+            @Override
+            public void run(CaptureList args) {
+                // The second argument "command" may also be missing, if the
+                // caller used the shortcut.
+                int startIdx = 1;
+                if (args.get(1).isEmpty()) {
+                    // Empty array (that is, not even containing an empty string) means that
+                    // we matched and skipped /(?:singleC|c)ommand/
+                    startIdx = 2;
+                }
+
+                String[] flatArgs = new String[args.size() - startIdx];
+                for (int i = startIdx; i < args.size(); i++) {
+                    flatArgs[i - startIdx] = args.get(i).get(0);
+                }
+                try {
+                    mScheduler.addCommand(flatArgs);
+                } catch (ConfigurationException e) {
+                    printLine("Failed to run command: " + e.toString());
+                }
+            }
+        };
+        trie.put(runRunCommand, RUN_PATTERN, "c(?:ommand)?", null);
+        trie.put(runRunCommand, RUN_PATTERN, null);
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+  Console的构造函数初始化了命令的匹配规则，而startConsole则是启动Console这个线程（Console继承自Thread类）。startConsole第一个Console参数为上面提到过的CompatibilityConsole实例，第二个参数args为执行vts-tradefed脚本带的额外参数，在我们平时使用中一般为空，用来创建全局配置（GlobalConfiguration），非全局配置的部分就添加到CompatibilityConsole实例的启动参数中。之后再为CompatibilityConsole实例添加CommandScheduler和KeyStoreFactory，通过Console#run运行线程。
+
+tools/tradefederation/core/src/com/android/tradefed/command/Console.java
+
+    public static void startConsole(Console console, String[] args) throws InterruptedException,
+            ConfigurationException {
+        for (int i = 0;i < args.length;i++) {
+            System.out.print(String.format("startConsole:%s",args[i]));
+			System.out.println();
+        }
+        
+        List<String> nonGlobalArgs = GlobalConfiguration.createGlobalConfiguration(args);
+
+		for(int i = 0;i <nonGlobalArgs.size();i++) {
+			System.out.print(String.format("nonGlobalArgs:%s",nonGlobalArgs.get(i)));
+			System.out.println();
+	    }
+
+        console.setArgs(nonGlobalArgs);
+        console.setCommandScheduler(GlobalConfiguration.getInstance().getCommandScheduler());
+        console.setKeyStoreFactory(GlobalConfiguration.getInstance().getKeyStoreFactory());
+        console.setDaemon(true);
+        console.start();
+
+        // Wait for the CommandScheduler to get started before we exit the main thread.  See full
+        // explanation near the top of #run()
+        console.awaitScheduler();
+    }
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+  Console#run首先启动通过CommandScheduler#start来启动CommandScheduler，因为CommandScheduler类也继承自Thread类。如果在运行vts-tradefed脚本带入了额外参数，就将这些额外参数当作输入参数进行处理；如果没有额外参数，就在命令交互行读取用户输入作为输入参数。输入参数经过之前提到的匹配规则处理后，会得到一个Runnable对象。以“run vts -m VtsVndkDependencyTest”命令为例，“run”会匹配一个ArgRunnable，剩下的“vts -m VtsVndkDependencyTest”会被放到一个CaptureList中，这个ArgRunnable和CaptureList会被作为参数传入到executeCmdRunnable里面去。又如“run command VtsVndkDependencyTest.config”命令，“run command”会匹配一个ArgRunnable，剩下的“VtsVndkDependencyTest.config”会被放到一个CaptureList中。
+
+tools/tradefederation/core/src/com/android/tradefed/command/Console.java
+
+    @Override
+    public void run() {
+        List<String> arrrgs = mMainArgs;
+
+        if (mScheduler == null) {
+            throw new IllegalStateException("command scheduler hasn't been set");
+        }
+
+        try {
+            // Check System.console() since jline doesn't seem to consistently know whether or not
+            // the console is functional.
+            if (!isConsoleFunctional()) {
+                if (arrrgs.isEmpty()) {
+                    printLine("No commands for non-interactive mode; exiting.");
+                    // FIXME: need to run the scheduler here so that the things blocking on it
+                    // FIXME: will be released.
+                    mScheduler.start();
+                    mScheduler.await();
+                    return;
+                } else {
+                    printLine("Non-interactive mode: Running initial command then exiting.");
+                    mShouldExit = true;
+                }
+            }
+
+            // Wait for the CommandScheduler to start.  It will hold the JVM open (since the Console
+            // thread is a Daemon thread), and also we require it to have started so that we can
+            // start processing user input.
+            mScheduler.start();
+            mScheduler.await();
+
+            String input = "";
+            CaptureList groups = new CaptureList();
+            String[] tokens;
+
+            // Note: since Console is a daemon thread, the JVM may exit without us actually leaving
+            // this read loop.  This is by design.
+            do {
+                if (arrrgs.isEmpty()) {
+                    input = getConsoleInput();
+
+                    if (input == null) {
+                        // Usually the result of getting EOF on the console
+                        printLine("");
+                        printLine("Received EOF; quitting...");
+                        mShouldExit = true;
+                        break;
+                    }
+
+                    tokens = null;
+                    try {
+						Log.d("TokenizeLine input",input);
+                        tokens = QuotationAwareTokenizer.tokenizeLine(input);
+					    for (int i = 0;i<tokens.length;i++) {
+				            Log.d("TOKEN:",tokens[i]);
+					    }
+						
+                    } catch (IllegalArgumentException e) {
+                        printLine(String.format("Invalid input: %s.", input));
+                        continue;
+                    }
+
+                    if (tokens == null || tokens.length == 0) {
+                        continue;
+                    }
+                } else {
+                    printLine(String.format("Using commandline arguments as starting command: %s",
+                            arrrgs));
+                    if (mConsoleReader != null) {
+                        // Add the starting command as the first item in the console history
+                        // FIXME: this will not properly escape commands that were properly escaped
+                        // FIXME: on the commandline.  That said, it will still be more convenient
+                        // FIXME: than copying by hand.
+                        final String cmd = ArrayUtil.join(" ", arrrgs);
+                        mConsoleReader.getHistory().addToHistory(cmd);
+                    }
+                    tokens = arrrgs.toArray(new String[0]);
+                    if (arrrgs.get(0).matches(HELP_PATTERN)) {
+                        // if started from command line for help, return to shell
+                        mShouldExit = true;
+                    }
+                    arrrgs = Collections.emptyList();
+                }
+
+                Runnable command = mCommandTrie.retrieve(groups, tokens);
+				for(int i=0;i<groups.size();i++) {
+					List<String> stringList = groups.get(i);
+					for (int j=0;j<stringList.size();j++) {
+						printLine(String.format("CommandTrie retrieve:%s",stringList.get(j)));
+					}
+				}
+                if (command != null) {
+                    executeCmdRunnable(command, groups);
+                } else {
+                    printLine(String.format(
+                            "Unable to handle command '%s'.  Enter 'help' for help.", tokens[0]));
+                }
+                RunUtil.getDefault().sleep(100);
+            } while (!mShouldExit);
+        } catch (Exception e) {
+            printLine("Console received an unexpected exception (shown below); shutting down TF.");
+            e.printStackTrace();
+        } finally {
+            mScheduler.shutdown();
+            // Make sure that we don't quit with messages still in the buffers
+            System.err.flush();
+            System.out.flush();
+        }
+    }
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+58
+59
+60
+61
+62
+63
+64
+65
+66
+67
+68
+69
+70
+71
+72
+73
+74
+75
+76
+77
+78
+79
+80
+81
+82
+83
+84
+85
+86
+87
+88
+89
+90
+91
+92
+93
+94
+95
+96
+97
+98
+99
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+  对于ArgRunnable，会以CaptureList为参数，调用其run函数；对于Runnable，直接调用其run函数。
+
+tools/tradefederation/core/src/com/android/tradefed/command/Console.java
+
+    @SuppressWarnings("unchecked")
+    void executeCmdRunnable(Runnable command, CaptureList groups) {
+        try {
+            if (command instanceof ArgRunnable) {
+                // FIXME: verify that command implements ArgRunnable<CaptureList> instead
+                // FIXME: of just ArgRunnable
+                ((ArgRunnable<CaptureList>) command).run(groups);
+            } else {
+                command.run();
+            }
+        } catch (RuntimeException e) {
+            e.printStackTrace();
+        }
+    }
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+CommandScheduler处理命令
+  前面看到run命令对应的ArgRunnable的run函数里面，会将run后面的参数通过CommandScheduler#addCommand添加到队列中。CommandScheduler#addCommand最终会调用到CommandScheduler#internalAddCommand。
+
+tools/tradefederation/core/src/com/android/tradefed/command/CommandScheduler.java
+
+    private boolean internalAddCommand(String[] args, long totalExecTime, String cmdFilePath)
+            throws ConfigurationException {
+        assertStarted();
+        CLog.d("internalAddCommand-->%s",ArrayUtil.join(" ", (Object[])args));
+        IConfiguration config = createConfiguration(args);
+        if (config.getCommandOptions().isHelpMode()) {
+            getConfigFactory().printHelpForConfig(args, true, System.out);
+        } else if (config.getCommandOptions().isFullHelpMode()) {
+            getConfigFactory().printHelpForConfig(args, false, System.out);
+        } else if (config.getCommandOptions().isJsonHelpMode()) {
+            try {
+                // Convert the JSON usage to a string (with 4 space indentation) and print to stdout
+                System.out.println(config.getJsonCommandUsage().toString(4));
+            } catch (JSONException e) {
+                CLog.logAndDisplay(LogLevel.ERROR, "Failed to get json command usage: %s", e);
+            }
+        } else if (config.getCommandOptions().isDryRunMode()) {
+            config.validateOptions();
+            String cmdLine = QuotationAwareTokenizer.combineTokens(args);
+            CLog.d("Dry run mode; skipping adding command: %s", cmdLine);
+            if (config.getCommandOptions().isNoisyDryRunMode()) {
+                System.out.println(cmdLine.replace("--noisy-dry-run", ""));
+                System.out.println("");
+            }
+        } else {
+            config.validateOptions();
+
+            if (config.getCommandOptions().runOnAllDevices()) {
+                addCommandForAllDevices(totalExecTime, args, cmdFilePath);
+            } else {
+                CommandTracker cmdTracker = createCommandTracker(args, cmdFilePath);
+                cmdTracker.incrementExecTime(totalExecTime);
+                ExecutableCommand cmdInstance = createExecutableCommand(cmdTracker, config, false);
+                addExecCommandToQueue(cmdInstance, 0);
+            }
+            return true;
+        }
+        return false;
+    }
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+  首先通过createConfiguration创建专属的配置（Configuration），这个后面再讲。根据配置和传入的命令参数创建一个ExecutableCommand，通过addExecCommandToQueue添加到mReadyCommands中，然后通过WaitObj#signalEventReceived唤醒阻塞的CommandScheduler（之前提到过CommandScheduler在没有新命令加入时，会每隔30s唤醒一次看看有没有需要命令需要处理）。
+  CommandScheduler处理命令的循环体如下。
+
+tools/tradefederation/core/src/com/android/tradefed/command/CommandScheduler.java
+
+            while (!isShutdown()) {
+                // wait until processing is required again
+                CLog.logAndDisplay(LogLevel.INFO, "Ready to wait 30s");
+                mCommandProcessWait.waitAndReset(mPollTime);
+                checkInvocations();
+                processReadyCommands(manager);
+                postProcessReadyCommands();
+            }
+1
+2
+3
+4
+5
+6
+7
+8
+  CommandScheduler#processReadyCommands会首先对mReadyCommands里面的命令进行排序处理，总执行时间短的放在前面。然后遍历mReadyCommands里面的命令，在allocateDevices分配到可用的设备时，直接将命令添加到mExecutingCommands队列中；在allocateDevices分配不到可用的设备时，将命令加入到mUnscheduledWarning，等待有设备可用再将命令添加到mExecutingCommands队列中。遍历完后，通过startInvocation对mExecutingCommands中的命令进行处理。
+
+tools/tradefederation/core/src/com/android/tradefed/command/CommandScheduler.java
+
+    protected void processReadyCommands(IDeviceManager manager) {
+        CLog.d("processReadyCommands...");
+        Map<ExecutableCommand, IInvocationContext> scheduledCommandMap = new HashMap<>();
+        // minimize length of synchronized block by just matching commands with device first,
+        // then scheduling invocations/adding looping commands back to queue
+        synchronized (this) {
+            // sort ready commands by priority, so high priority commands are matched first
+            Collections.sort(mReadyCommands, new ExecutableCommandComparator());
+            Iterator<ExecutableCommand> cmdIter = mReadyCommands.iterator();
+            while (cmdIter.hasNext()) {
+                ExecutableCommand cmd = cmdIter.next();
+                IConfiguration config = cmd.getConfiguration();
+                IInvocationContext context = new InvocationContext();
+                context.setConfigurationDescriptor(config.getConfigurationDescription());
+                Map<String, ITestDevice> devices = allocateDevices(config, manager);
+				Iterator<Map.Entry<String, ITestDevice>> it = devices.entrySet().iterator();
+				while (it.hasNext()) {
+					Map.Entry<String, ITestDevice> entry = it.next();
+					System.out.println("key= " + entry.getKey());
+                }
+                if (!devices.isEmpty()) {
+                    cmdIter.remove();
+                    mExecutingCommands.add(cmd);
+                    context.addAllocatedDevice(devices);
+
+                    // track command matched with device
+                    scheduledCommandMap.put(cmd, context);
+                    // clean warned list to avoid piling over time.
+                    mUnscheduledWarning.remove(cmd);
+                } else {
+                    if (!mUnscheduledWarning.contains(cmd)) {
+                        CLog.logAndDisplay(LogLevel.DEBUG, "No available device matching all the "
+                                + "config's requirements for cmd id %d.",
+                                cmd.getCommandTracker().getId());
+                        // make sure not to record since it may contains password
+                        System.out.println(
+                                String.format(
+                                        "The command %s will be rescheduled.",
+                                        Arrays.toString(cmd.getCommandTracker().getArgs())));
+                        mUnscheduledWarning.add(cmd);
+                    }
+                }
+            }
+        }
+
+        // now actually execute the commands
+        for (Map.Entry<ExecutableCommand, IInvocationContext> cmdDeviceEntry : scheduledCommandMap
+                .entrySet()) {
+            ExecutableCommand cmd = cmdDeviceEntry.getKey();
+            startInvocation(cmdDeviceEntry.getValue(), cmd,
+                    new FreeDeviceHandler(getDeviceManager()));
+            if (cmd.isLoopMode()) {
+                addNewExecCommandToQueue(cmd.getCommandTracker());
+            }
+        }
+        CLog.d("done processReadyCommands...");
+    }
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+  CommandScheduler#startInvocation启动了一个线程InvocationThread来执行命令。
+
+tools/tradefederation/core/src/com/android/tradefed/command/CommandScheduler.java
+
+    private void startInvocation(
+            IInvocationContext context,
+            ExecutableCommand cmd,
+            IScheduledInvocationListener... listeners) {
+        initInvocation();
+
+        // Check if device is not used in another invocation.
+        throwIfDeviceInInvocationThread(context.getDevices());
+
+        CLog.d("starting invocation for command id %d", cmd.getCommandTracker().getId());
+        // Name invocation with first device serial
+        final String invocationName = String.format("Invocation-%s",
+                context.getSerials().get(0));
+		CLog.d("create an invocation thread:%s",invocationName);
+        InvocationThread invocationThread = new InvocationThread(invocationName, context, cmd,
+                listeners);
+        logInvocationStartedEvent(cmd.getCommandTracker(), context);
+        invocationThread.start();
+        addInvocationThread(invocationThread);
+    }
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+————————————————
