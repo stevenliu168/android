@@ -1,0 +1,59 @@
+search key:dumpsys
+
+https://www.cnblogs.com/yangjj08/p/11054429.html
+dumpsys命令
+1、命令说明
+dumpsys  用户系统诊断，它运行在设备上，并提供系统服务状态信息
+
+2、系统服务
+adb shell dumpsys –l
+
+3、获取设备分辨率
+dumpsys display |grep DisplayDeviceInfo
+
+4、获取package信息
+adb shell dumpsys package
+加上-h可以获取帮助信息
+获取某个包的信息：
+adb shell dumpsys package 包名
+
+5、activity
+（参见：https://blog.csdn.net/yyhjifeng/article/details/73322157）
+
+dumpsys activity [options] [cmd]
+
+options可选值：
+
+-a ：dump所有；
+-c ：dump客户端；
+-p [package] ：dump指定的包名；
+-h ：输出帮助信息；
+dumpsys activity 等价于依次输出下面7条指令：
+
+dumpsys activity intents
+dumpsys activity broadcasts
+dumpsys activity providers
+dumpsys activity services
+dumpsys activity recents
+dumpsys activity activities
+dumpsys activity processes
+
+cmd可选值
+cmd：上表加粗项是指直接跟 包名 ，另外services和providers还可以跟 组件名 ；
+缩写：基本都是cmd首字母或者前几个字母，用cmd和缩写是等效： dumpsys activity broadcasts与 dumpsys activity b //等效
+
+
+其他不在详述
+adb shell dumpsys meminfo
+要获取具体应用的内存信息，可加上包名
+adb shell dumpsys meminfo 包名
+
+dumpsys cpuinfo #查询CPU情况
+dumpsys activity #查询AMS服务相关信息
+dumpsys window #查询WMS服务相关信息
+
+
+https://www.cnblogs.com/hellokitty2/p/12251604.html
+dumpsys学习笔记 
+
+****************************************************************************************************************
