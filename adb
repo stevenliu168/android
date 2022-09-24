@@ -41,3 +41,8 @@ adb -s 127.0.0.1:8531 shell whoami
 #在71.14.16.215:8531设备上安装apk
 adb -s 71.14.16.215:8531 install /home/lxn/CTS/android-cts/testcases/CtsJvmtiRunTest1900DeviceApp.apk
 adb -s 127.0.0.1:8531 install /home/lxn/CTS/android-cts/testcases/CtsJvmtiRunTest1900DeviceApp.apk 
+
+*********************************************************************************************************
+https://blog.csdn.net/u013512708/article/details/46757961
+adb 常用命令和获取系统root权限
+
