@@ -1,0 +1,18 @@
+search key:android Primary User secondary_user
+https://developer.android.google.cn/work/dpc/dedicated-devices/multiple-users
+Manage multiple users
+Secondary users are Android users with separate apps and data saved between sessions. You manage the user with an admin component. These users are useful for cases where a device is picked up at the start of a shift, such as delivery drivers or security workers.
+Ephemeral users are secondary users that the system deletes when the user stops, switches away, or the device reboots. These users are useful for cases where data can be deleted after the session finishes, such as public-access internet kiosks.
+
+
+https://www.zhihu.com/question/49219923/answer/1395164062
+是否可以利用Android的多用户模式愉快地使用阿里系和百度系的软件？
+
+多用户功能特别适合对付墙内良心软件.新建的用户电话和短信功能默认是关掉的,每个用户的通信录,照片,文件只能访问自己的,android源于linux,对linux而言,多用户本来就是基本功能.
+android的用户类型分三种,文档里是这样说的:
+Android device administration uses the following user types.
+Primary(机主). First user added to a device. The primary user cannot be removed except by factory reset and is always running even when other users are in the foreground. This user also has special privileges and settings only it can set.
+Secondary(普通多用户). Any user added to the device other than the primary user. Secondary users can be removed (either by themselves or by the primary user) and cannot impact other users on a device. These users can run in the background and continue to have network connectivity.
+Guest(游客). Temporary secondary user. Guest users have an explicit option to quickly delete the guest user when its usefulness is over. There can be only one guest user at a time.
+普通新建的用户的app是可以后台运行的.但是还有个特殊的游客用户,在一加7的手机上试的效果,从游客切换到其它用户时,它运行的app是被停掉的,这个功能非常有意义.一加手机切到游客用户时会提示选择重新开始还是从上次继续,选重新开始进去,会是像拿到一个刚出厂机子的效果,之前在游客用户里装的app都没了,选择"继续"的话,以前的app会保留,但是感觉会不小心按错,每次重装app就麻烦了.不知道其它手机是怎样的情况.
+android很早的版本就有多用户,但国内手机基本把这个功能阉割了,厂家们显然意识到这个功能对良心软件们是个灾难.
