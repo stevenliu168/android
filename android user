@@ -16,3 +16,17 @@ Secondary(普通多用户). Any user added to the device other than the primary 
 Guest(游客). Temporary secondary user. Guest users have an explicit option to quickly delete the guest user when its usefulness is over. There can be only one guest user at a time.
 普通新建的用户的app是可以后台运行的.但是还有个特殊的游客用户,在一加7的手机上试的效果,从游客切换到其它用户时,它运行的app是被停掉的,这个功能非常有意义.一加手机切到游客用户时会提示选择重新开始还是从上次继续,选重新开始进去,会是像拿到一个刚出厂机子的效果,之前在游客用户里装的app都没了,选择"继续"的话,以前的app会保留,但是感觉会不小心按错,每次重装app就麻烦了.不知道其它手机是怎样的情况.
 android很早的版本就有多用户,但国内手机基本把这个功能阉割了,厂家们显然意识到这个功能对良心软件们是个灾难.
+
+
+search key:android secondary_user
+https://blog.csdn.net/luansxx/article/details/121010035
+Android 框架实现分析 - 应用 - 细节
+
+https://source.android.google.cn/reference/tradefed/com/android/tradefed/testtype/suite/params/SecondaryUserHandler
+次要用户处理程序
+
+https://www.jianshu.com/p/8f95069f238b?utm_campaign=maleskine&utm_content=note&utm_medium=seo_notes&utm_source=recommendation
+Android非主用户无线相关设置的显示 - 简书
+
+https://www.icode9.com/content-4-1327611.html
+<Android开发> Android内核系统开发- 启动过程详解 (第4部...
