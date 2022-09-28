@@ -21,6 +21,7 @@ adb disconnect
 
 #获取root权限
 adb root
+adb -s 127.0.0.1:8531 root
 
 # 重新挂载 
 adb remount
