@@ -1,0 +1,58 @@
+https://zhuanlan.zhihu.com/p/399414915
+Android主要的系统Log分为以下几种：
+ANR log
+bugreport log
+Tombstones Log
+Dropbox Log
+logcat的Log文件
+qnx log
+系统定制和应用开发过程中可以利用以上多种Log去进行系统分析和问题定位
+
+ANR log
+Log作用： 主要是收集系统中的ANR相关的Log，方便开发者解析使用
+Log位置：/data/anr/*
+
+Tombstones Log（墓碑Log）
+Log作用：系统崩溃时留下的遗言，怎么死的，死哪了，死的多惨。
+当一个动态库（native 程序）开始执行时，系统会注册一些连接到 debuggerd 的 signal handlers，当系统 crash（崩溃） 的时候，会保存一个 tombstone 文件到/data/tombstones目录下（Logcat中也会有相应的信息），文件的确就像墓碑一样记录了死亡了的进程的基本信息（例如进程的进程号，线程号），死亡的地址（在哪个地址上发生了 Crash），死亡时的现场是什么样的（记录了一系列的堆栈调用信息）等等。
+Log位置：/data/tombstones/*
+
+Dropbox Log
+Log作用：系统抓取的发生的严重问题的信息（ANR等）。
+Log位置：/data/system/dropbox/*
+
+logcat的Log
+Log作用：android系统运行中的所有正常Log。
+Log位置：adb logcat -v time >D:\log.txt
+
+qnx log
+Log作用：车载Android相关的硬件Log。
+Log位置：data/vendor/log/qnxlog等等
+
+bugreport log
+Log作用： bugreport记录android启动过程的log,以及启动后的系统状态,包括进程列表，内存信息，VM信息等等到.
+Log生成的方式：adb bugreport > bugreport.txt
+使用方式：
+3.1 通过cmd line: +进程名(查看进程信息)
+xx----- pid 2007 at 2021-08-11 10:51:42 -----
+Cmd line: com.xx.xx进程名
+Build fingerprint: 'Android'
+ABI: 'arm64'
+Build type: optimized
+3.2 通过CPU usage from: 查看Cpu的相关使用情况，通常长时间超过90%以上 （90% TOTAL），代表系统卡顿，有异常。
+Load: 3.47 / 4.41 / 2.12
+CPU usage from 204297ms to 1048ms ago (2021-08-02 14:39:08.031 to 2021-08-02 14:42:31.280):
+  19% 1034
+  14% 454/surfaceflinger: 5.1% user + 9.8% kernel / faults: 1807 minor 1 major
+  13% 572/system_server: 7.4% user + 6.3% kernel / faults: 67487 minor 145 major
+  6.2% 1903/android.process.media: 3.7% user + 2.4% kernel / faults: 21959 minor 5 major
+  6% 439/android.hardware.graphics.composer@2.1-service: 2% user + 4% kernel / faults: 266 minor
+ +0% 8498/dumpsys: 0% user + 0% kernel
+62% TOTAL: 29% user + 25% kernel + 1.4% iowait + 4.5% irq + 1.6% softirq
+------ 0.036s was the duration of 'DUMPSYS CPUINFO' ------
+------ 11.637s was the duration of 'DUMP TRACES' ------
+3.3 通过DUMPSYS MEMINFO：查看内存使用情况，和CPU类似，内存长期超过90% (Free RAM/Total RAM)以上也会造成系统性能异常的状态，可能引发系统大量进程和服务被杀重启，GC、OOM、WatchDog等。
+Total RAM: 4,243,196K (status normal) Free RAM: 929,246K ( 64,038K cached pss + 546,296K cached kernel + 318,912K free) Used RAM: 2,599,924K (2,193,164K used pss + 406,760K kernel) Lost RAM: 714,026K Tuning: 256 (large 512), oom 322,560K, restore limit 107,520K (high-end-gfx) ------ 10.687s was the duration of 'DUMPSYS MEMINFO' ------ ------ DUMPSYS CPUINFO (/system/bin/dumpsys -t 10 cpuinfo -a) ------
+
+4 bugreport Log包含的信息介绍如下图：
+其中event log 比较关键能够看出来所有的用户和Monkey的关键信息，页面跳转和焦点变化等等
