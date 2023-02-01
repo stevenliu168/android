@@ -52,3 +52,16 @@ adb 常用命令和获取系统root权限
 https://blog.csdn.net/tjcwt2011/article/details/126330483
 adb命令 android 串口_「Android」Android常规adb命令
 *********************************************************************************************************
+
+*********************************************************************************************************
+search key:pm set-install-location option 2
+
+https://blog.csdn.net/fishing_monster/article/details/118407056
+安卓5.0设置安装位置后使用安装命令应用未安装在SD卡
+
+https://blog.csdn.net/weixin_34253539/article/details/91598714
+使用pm命令安装或者卸载APK
+
+https://www.cnblogs.com/FlyToDream/p/10419755.html
+adb shell 命令之----pm
+*********************************************************************************************************
