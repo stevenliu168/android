@@ -1,0 +1,51 @@
+http://3ms.huawei.com/km/blogs/details/6065899
+
+一、测试环境准备：
+1. 安装JDK 1.8以上
+2. 将androidtools位置添加到环境变量PATH中(测试时会用到aapt等命令)，比如：
+C:\Program Files (x86)\Android\android-sdk\build-tools\23.0.3\
+
+二、根据平台下载对应的CTS测试套件
+下载地址：https://source.android.com/compatibility/cts/downloads
+下载完成后后解压，在android-cts/tools目录下新建"cts-tradefed.bat"文件并写入如下内容：
+
+-----------------cts-tradefed.bat  start----------------------------------------------------------------------------------------
+@echo off
+setlocal enabledelayedexpansion
+setlocal ENABLEEXTENSIONS
+
+set CTS_ROOT=%~dp0\..\..
+
+set JAR_DIR=%CTS_ROOT%\android-cts\tools
+
+set JARS=tradefed.jar hosttestlib.jar loganalysis.jar compatibility-host-util.jar compatibility-host-util-tests.jar cts-tradefed.jar cts-tradefed-tests.jar compatibility-common-util-tests.jar compatibility-tradefed-tests.jar host-libprotobuf-java-full.jar
+
+set DestJar=*.jar
+
+set JAR_PATH=.
+
+for %%i in (%JARS%) do (
+set JAR_PATH=!JAR_PATH!;%%i
+)
+
+java %RDBG_FLAG% -cp %JAR_PATH% -DCTS_ROOT=%CTS_ROOT% com.android.compatibility.common.tradefed.command.CompatibilityConsole %*
+
+pause
+-----------------cts-tradefed.bat  end---------------------------------------------------------------------------------
+三、开始测试
+1. cmd命令行通过adb 连接 测试机。针对测试机进行相关设置以免干扰CTS测试
+打开GPS、语言设置为English等
+2. cmd命令行执行"cts-tradefed.bat"进入交互界面(cts-tf >)
+3. 输入命令继续测试：run cts -d -o --disable-reboot --logcat-on-failure --skip-system-status-check com.android.compatibility.common.tradefed.targetprep.NetworkConnectivityChecker -m CtsWebkitTestCases -t android.webkit.cts.WebViewTest#testSetInitialScale -s 192.168.1.105:5555
+
+注:
+
+参数选项
+
+-o = --skip-preconditions
+-d = --skip-device-info
+--skip-system-status-check com.android.compatibility.common.tradefed.targetprep.NetworkConnectivityChecker
+则可以跳过网络连接检测，这样可以节省不少时间
+
+
+具体命令参数等可以参考：https://source.android.com/compatibility/cts/run
