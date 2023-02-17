@@ -1,0 +1,19 @@
+http://3ms.huawei.com/km/blogs/details/5031893
+
+1. 编写测试程序，测试程序要符合测试框架要求，大体和普通apk一致，同样很好理解
+
+2. 编译，把源码放到sdk随便一个目录, mm编译
+
+3. 会生成到
+
+/platform/out/host/linux-x86/cts/android-cts/testcases$ ls CtsTest.*
+CtsTest.apk CtsTest.config
+4. 放入到 测试套件android-cts/testcases/目录
+
+5. 开始测试cd android-cts/tools && ./cts-tradefed
+
+7. 输入 l m 可以看到已经有CtsTest
+
+8. 开始测试run cts -m CtsTest
+
+9. 得到测试结果
